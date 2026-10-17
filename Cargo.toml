@@ -1,0 +1,26 @@
+[package]
+name = "bevy_atmos"
+version = "0.1.0"
+edition = "2024"
+description = "Sky, volumetric clouds, weather, wet surfaces and modern water for Bevy, with an in-game editor that saves a look per level."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Nilbong/bevy_atmos"
+homepage = "https://nilbong.github.io/bevy_atmos/"
+readme = "README.md"
+keywords = ["bevy", "gamedev", "sky", "weather", "water"]
+categories = ["game-development", "rendering"]
+exclude = ["docs/", "media/"]
+
+[dependencies]
+bevy = "0.19.1"
+# The fog-before-transparents schedule pass (a type in its signature; already Bevy's).
+indexmap = "2"
+
+[[example]]
+name = "demo"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

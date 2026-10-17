@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atmos: sky, weather and water for Bevy</title>
+<meta name="description" content="bevy_atmos: time of day, a physical sky with volumetric clouds, rain, snow, wet surfaces, modern water and rivers for Bevy 0.19, tuned live from a beginner-friendly in-game editor. Free and open source.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Atmos: sky, weather and water for Bevy">
+<meta property="og:description" content="Time of day, volumetric clouds, rain, snow, wet surfaces and modern water for Bevy 0.19, with an in-game editor. Free and open source.">
+<meta property="og:image" content="https://nilbong.github.io/bevy_atmos/img/hero.jpg">
+<meta property="og:url" content="https://nilbong.github.io/bevy_atmos/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nilbong.github.io/bevy_atmos/img/hero.jpg">
+<meta name="theme-color" content="#f6f8fb">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f2a44'/%3E%3Ccircle cx='13' cy='13' r='6' fill='%23ffb35c'/%3E%3Cpath d='M9 24h14a4.5 4.5 0 0 0-1-8.9A6 6 0 0 0 10.4 17 3.5 3.5 0 0 0 9 24z' fill='%23eaf3ff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --surface: #ffffff;
+  --ink: #0f2a44;
+  --ink-2: #3c5470;
+  --muted: #6b7f95;
+  --line: #e1e8f0;
+  --sky: #2f80d8;
+  --sky-soft: #e6f0fc;
+  --sun: #ff9a3c;
+  --sun-soft: #fff1e3;
+  --leaf: #2fa37a;
+  --code-bg: #0f2a44;
+  --code-ink: #e7f0fa;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(15, 42, 68, .06), 0 8px 28px rgba(15, 42, 68, .08);
+  --head: "Sora", "Segoe UI", system-ui, sans-serif;
+  --body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.65 var(--body); -webkit-font-smoothing: antialiased;
+}
+img { max-width: 100%; display: block; }
+a { color: var(--sky); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-family: var(--mono); font-size: .88em; background: var(--sky-soft); color: var(--ink); padding: .1em .38em; border-radius: 6px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+h1, h2, h3 { font-family: var(--head); line-height: 1.2; margin: 0; letter-spacing: -.01em; }
+h2 { font-size: clamp(28px, 4vw, 38px); }
+h3 { font-size: 18px; }
+p { margin: 0; }
+.eyebrow { font: 600 12px/1 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--sun); margin-bottom: 12px; }
+.lead { color: var(--ink-2); font-size: 18px; max-width: 62ch; margin-top: 14px; }
+
+/* nav */
+nav { position: sticky; top: 0; z-index: 20; background: rgba(246, 248, 251, .86); backdrop-filter: saturate(1.4) blur(12px); border-bottom: 1px solid var(--line); }
+nav .wrap { display: flex; align-items: center; gap: 28px; height: 62px; }
+.brand { display: flex; align-items: center; gap: 10px; font: 700 19px var(--head); color: var(--ink); }
+.brand:hover { text-decoration: none; }
+.brand svg { width: 30px; height: 30px; }
+nav ul { display: flex; gap: 22px; list-style: none; margin: 0 0 0 auto; padding: 0; }
+nav ul a { color: var(--ink-2); font-weight: 500; font-size: 15px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 20px; border-radius: 999px; font: 600 15px var(--body); border: 1px solid transparent; cursor: pointer; transition: transform .15s, box-shadow .15s, background .15s; }
+.btn:hover { text-decoration: none; transform: translateY(-1px); }
+.btn.primary { background: var(--ink); color: #fff; box-shadow: 0 6px 18px rgba(15, 42, 68, .22); }
+.btn.ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn.small { padding: 8px 14px; font-size: 14px; }
+.btn svg { width: 18px; height: 18px; }
+
+/* hero */
+.hero { position: relative; overflow: hidden; padding: 88px 0 72px;
+  background: radial-gradient(900px 420px at 82% -10%, #ffe2c2 0%, rgba(255, 226, 194, 0) 60%),
+              linear-gradient(180deg, #d9ebff 0%, #eef5fd 46%, var(--bg) 100%); }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 56px; align-items: center; }
+.hero h1 { font-size: clamp(44px, 7vw, 76px); letter-spacing: -.03em; }
+.hero h1 span { background: linear-gradient(90deg, var(--sky), #7a6cf0 55%, var(--sun)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero .tag { font: 600 clamp(19px, 2.4vw, 24px) var(--head); color: var(--ink-2); margin-top: 10px; }
+.hero .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+.badge { font: 500 13px var(--body); color: var(--ink-2); background: rgba(255, 255, 255, .7); border: 1px solid var(--line); padding: 5px 11px; border-radius: 999px; }
+.shot { border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); border: 1px solid var(--line); }
+.shot img { width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.hero .shot { transform: rotate(.6deg); box-shadow: 0 24px 60px rgba(15, 42, 68, .18); }
+.sun-dot { position: absolute; width: 220px; height: 220px; border-radius: 50%; right: 6%; top: -90px; background: radial-gradient(circle, #ffc887 0%, rgba(255, 200, 135, 0) 70%); pointer-events: none; }
+
+/* one line */
+.oneline { margin-top: -28px; position: relative; z-index: 2; }
+.oneline .card { display: grid; grid-template-columns: auto 1fr; gap: 24px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 24px; box-shadow: var(--shadow); }
+.oneline .label { font: 600 15px var(--head); color: var(--ink); }
+.oneline .label small { display: block; font: 400 13px var(--body); color: var(--muted); }
+
+/* sections */
+section { padding: 92px 0; }
+section.alt { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.head { margin-bottom: 44px; }
+
+/* features */
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feature { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; transition: box-shadow .2s, transform .2s; }
+.feature:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+.feature .icon { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; margin-bottom: 16px; }
+.feature .icon svg { width: 22px; height: 22px; }
+.feature p { color: var(--ink-2); font-size: 15px; margin-top: 8px; }
+.i-sky { background: var(--sky-soft); color: var(--sky); }
+.i-sun { background: var(--sun-soft); color: var(--sun); }
+.i-leaf { background: #e3f5ee; color: var(--leaf); }
+.i-violet { background: #eeebfd; color: #6a5ae0; }
+
+/* editor spotlight */
+.spot { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 52px; align-items: center; }
+.spot ul { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 12px; }
+.spot li { display: grid; grid-template-columns: 24px 1fr; gap: 10px; color: var(--ink-2); }
+.spot li svg { width: 20px; height: 20px; color: var(--leaf); margin-top: 3px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.chip { font: 600 13px var(--body); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.chip.c1 { background: #fff7d6; } .chip.c2 { background: #eef1f5; } .chip.c3 { background: var(--sun-soft); }
+.chip.c4 { background: #e6e8fb; } .chip.c5 { background: #e1e8ef; } .chip.c6 { background: #eef7ff; }
+
+/* gallery */
+.gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.gallery figure { margin: 0; }
+.gallery figcaption { font-size: 14px; color: var(--muted); margin-top: 10px; }
+.gallery figcaption b { color: var(--ink); font-weight: 600; }
+
+/* steps */
+.steps { display: grid; gap: 22px; counter-reset: step; }
+.step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 18px; }
+.step::before { counter-increment: step; content: counter(step); width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: #fff; font: 600 16px var(--head); }
+.step h3 { margin-top: 8px; }
+.step p { color: var(--ink-2); margin-top: 6px; }
+pre { position: relative; margin: 14px 0 0; background: var(--code-bg); color: var(--code-ink); border-radius: 12px; padding: 18px 72px 18px 20px; overflow-x: auto; font: 14px/1.6 var(--mono); }
+pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+.tok-k { color: #8ec5ff; } .tok-s { color: #ffcf8a; } .tok-c { color: #7f97b0; } .tok-t { color: #9be3c4; }
+.copy { position: absolute; top: 10px; right: 10px; font: 500 12px var(--body); background: rgba(255, 255, 255, .1); color: var(--code-ink); border: 1px solid rgba(255, 255, 255, .18); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.copy:hover { background: rgba(255, 255, 255, .18); }
+.two { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; }
+.panel p { color: var(--ink-2); margin-top: 8px; }
+section:not(.alt) .panel { box-shadow: none; }
+
+/* keys */
+.keys { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 24px; }
+kbd { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 7px; padding: 2px 8px; color: var(--ink); }
+
+/* integration */
+.integ { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.integ .panel h3 { display: flex; align-items: center; gap: 10px; }
+.integ .panel h3 code { font-size: 13px; }
+
+/* limits */
+.limits { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 40px; list-style: none; padding: 0; margin: 0; }
+.limits li { padding: 16px 0; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 15px; }
+.limits li b { display: block; color: var(--ink); font: 600 16px var(--head); margin-bottom: 4px; }
+
+/* faq */
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+details + details { margin-top: 10px; }
+summary { cursor: pointer; font-weight: 600; }
+details p { color: var(--ink-2); margin-top: 10px; }
+
+/* licence + footer */
+.licence { text-align: center; }
+.licence .lead { margin: 14px auto 0; }
+.licence .cta { display: flex; justify-content: center; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+
+@media (max-width: 900px) {
+  .hero .wrap, .spot, .two { grid-template-columns: minmax(0, 1fr); }
+  .grid, .gallery { grid-template-columns: repeat(2, 1fr); }
+  .hero .shot { transform: none; }
+  nav ul { display: none; }
+  nav .btn { margin-left: auto; }
+}
+@media (max-width: 620px) {
+  .wrap { padding: 0 16px; }
+  .grid, .gallery, .integ, .limits, .keys { grid-template-columns: minmax(0, 1fr); }
+  .oneline .card { grid-template-columns: minmax(0, 1fr); }
+  section { padding: 64px 0; }
+  .hero { padding: 56px 0 64px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn, .feature { transition: none; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Atmos home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0f2a44"/><circle cx="13" cy="13" r="6" fill="#ffb35c"/><path d="M9 24h14a4.5 4.5 0 0 0-1-8.9A6 6 0 0 0 10.4 17 3.5 3.5 0 0 0 9 24z" fill="#eaf3ff"/></svg>
+      Atmos
+    </a>
+    <ul>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#editor">Editor</a></li>
+      <li><a href="#gallery">Gallery</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#limits">Limitations</a></li>
+    </ul>
+    <a class="btn ghost small" href="https://github.com/Nilbong/bevy_atmos">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="sun-dot"></div>
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">bevy_atmos &middot; for Bevy 0.19</div>
+      <h1><span>Atmos</span></h1>
+      <p class="tag">Sky, weather and water for Bevy</p>
+      <p class="lead">Time of day, a physical sky with volumetric clouds, rain and snow that soak the ground, modern water with flowing rivers, fog, sun shafts and a colour grade. Add it in one line, then tune it live in your game from an editor anyone can use.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Get started</a>
+        <a class="btn ghost" href="https://github.com/Nilbong/bevy_atmos">View on GitHub</a>
+      </div>
+      <div class="badges">
+        <span class="badge">Free &amp; open source</span>
+        <span class="badge">MIT or Apache-2.0</span>
+        <span class="badge">Mouse, keyboard &amp; gamepad</span>
+      </div>
+    </div>
+    <div class="shot"><img src="img/hero.jpg" alt="Golden hour over the demo scene: low warm sun, long shadows, clouds lit orange" width="1280" height="720"></div>
+  </div>
+</header>
+
+<div class="wrap oneline">
+  <div class="card">
+    <div class="label">One plugin line<small>plus a tag on your camera and sun</small></div>
+    <pre><code><span class="tok-t">App</span>::new().add_plugins((<span class="tok-t">DefaultPlugins</span>, <span class="tok-t">AtmosPlugin</span>::new(<span class="tok-s">"my_level"</span>, <span class="tok-s">"looks"</span>)))</code></pre>
+  </div>
+</div>
+
+<section id="features">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">Features</div>
+      <h2>Everything outdoors, in one plugin</h2>
+      <p class="lead">Each part works on its own and every value is a live slider. Nothing changes until you change it, so a level without a saved look looks exactly as your game made it.</p>
+    </div>
+    <div class="grid">
+      <div class="feature">
+        <div class="icon i-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></div>
+        <h3>A look editor anyone can use</h3>
+        <p>Press F9. Six plain-English tabs, a help line on every slider, click to reset, presets, Save, Revert and hold-to-compare.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></div>
+        <h3>Time of day</h3>
+        <p>Set the hour or let the clock run. The sun follows a real path for your latitude and the moon lights the night.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 18h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 11.5 3.3 3.3 0 0 0 7 18z"/></svg></div>
+        <h3>Sky &amp; volumetric clouds</h3>
+        <p>A physical sky whose colours follow the sun, and 3D clouds raymarched per pixel: cover, greyness, wisps, height and drift.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 14h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.2 7.5 3.3 3.3 0 0 0 7 14zM8 17l-1 3M12 17l-1 3M16 17l-1 3"/></svg></div>
+        <h3>Rain, snow &amp; wet surfaces</h3>
+        <p>Rain and snow slant in the wind. Surfaces darken as they soak, collect puddles that ripple, and dry slowly after.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-leaf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 9c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2M2 15c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/></svg></div>
+        <h3>Modern water &amp; rivers</h3>
+        <p>Wind-driven waves, shore and crest foam, reflections, sun glitter, rain rings and underwater fog. Rivers flow downhill into white water.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M5 6l2 2M19 6l-2 2M3 21l6-9M9 21l3-9M15 21l-3-9M21 21l-6-9"/></svg></div>
+        <h3>Fog, shafts &amp; reflections</h3>
+        <p>Distance fog tinted by the sky, beams of sunlight through the haze, and screen-space reflections on wet ground.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M12 12l6.4-6.4"/></svg></div>
+        <h3>Colour grade</h3>
+        <p>Exposure, warmth, tint, contrast and saturation as the final touch.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-leaf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3h9l3 3v15H6zM9 3v5h6M9 14h6M9 17h4"/></svg></div>
+        <h3>A saved look per level</h3>
+        <p>Looks are small text files, one value a line: easy to read, diff and commit, or ship inside your game.</p>
+      </div>
+      <div class="feature">
+        <div class="icon i-sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12l7-7 2 4 4-2-2 4 4 2-7 7-2-4-4 2 2-4z"/></svg></div>
+        <h3>Fly camera</h3>
+        <p>Press F8 to fly round the level and judge the look from anywhere, with mouse and keys or a pad.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="editor" class="alt">
+  <div class="wrap spot">
+    <div class="shot"><img src="img/editor.jpg" alt="The look editor panel on the Weather tab: presets, sliders with units and a help line" width="1280" height="720" loading="lazy"></div>
+    <div>
+      <div class="eyebrow">The editor</div>
+      <h2>Made for people who aren't graphics programmers</h2>
+      <ul>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Tabs with plain names: Time &amp; Sun, Sky &amp; Clouds, Weather, Water, Fog &amp; Light, Colour. Extra settings wait under <em>Advanced</em>.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Every slider shows its unit, says what it does when you hover it, and resets with one click.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Hold <em>Compare</em> to see the level as your game made it. Save, or Revert to the last save.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>The status line says which level's look is loaded and whether it has unsaved changes.</span></li>
+      </ul>
+      <div class="chips" aria-label="Presets">
+        <span class="chip c1">Clear Day</span><span class="chip c2">Overcast</span><span class="chip c3">Golden Hour</span><span class="chip c4">Night</span><span class="chip c5">Storm</span><span class="chip c6">Snow</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="gallery">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">Gallery</div>
+      <h2>One scene, many skies</h2>
+      <p class="lead">All taken in the demo that comes with the plugin, from the presets and a few slider changes.</p>
+    </div>
+    <div class="gallery">
+      <figure><div class="shot"><img src="img/storm.jpg" alt="A storm: heavy rain, dark clouds, soaked ground and puddles" loading="lazy" width="1280" height="720"></div><figcaption><b>Storm.</b> Rain, wind and puddles.</figcaption></figure>
+      <figure><div class="shot"><img src="img/snow.jpg" alt="Snow falling over the scene under a white overcast sky" loading="lazy" width="1280" height="720"></div><figcaption><b>Snow.</b> Cold light and falling snow.</figcaption></figure>
+      <figure><div class="shot"><img src="img/night.jpg" alt="Night lit by the moon" loading="lazy" width="1280" height="720"></div><figcaption><b>Night.</b> The moon takes over.</figcaption></figure>
+      <figure><div class="shot"><img src="img/clouds.jpg" alt="An overcast sky of volumetric clouds" loading="lazy" width="1280" height="720"></div><figcaption><b>Overcast.</b> Volumetric clouds.</figcaption></figure>
+      <figure><div class="shot"><img src="img/water.jpg" alt="Rough water in a pool with foam on the wave crests" loading="lazy" width="1280" height="720"></div><figcaption><b>Rough water.</b> Wind-driven waves and crest foam.</figcaption></figure>
+      <figure><div class="shot"><img src="img/shore.jpg" alt="Waves breaking into foam along the pool's edge" loading="lazy" width="1280" height="720"></div><figcaption><b>Shoreline.</b> Foam where water meets the edge.</figcaption></figure>
+      <figure><div class="shot"><img src="img/hero.jpg" alt="Golden hour over the demo scene" loading="lazy" width="1280" height="720"></div><figcaption><b>Golden Hour.</b> Low sun and long shadows.</figcaption></figure>
+      <figure><div class="shot"><img src="img/river.jpg" alt="A river flowing past a rock with foam trailing behind it" loading="lazy" width="1280" height="720"></div><figcaption><b>River.</b> Foam trailing a rock.</figcaption></figure>
+      <figure><div class="shot"><img src="img/river_glitter.jpg" alt="Sun glitter on a river at sunset, looking downstream" loading="lazy" width="1280" height="720"></div><figcaption><b>Downstream.</b> Low sun glitter on the flow.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="alt">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">Download &amp; install</div>
+      <h2>Up and running in three steps</h2>
+      <p class="lead">You need Bevy 0.19, a recent stable Rust (edition 2024, from <a href="https://rustup.rs">rustup.rs</a>) and a GPU that runs Bevy's default renderer on Vulkan, DirectX 12 or Metal. WebGL2 isn't supported.</p>
+    </div>
+    <div class="two">
+      <div class="steps">
+        <div class="step"><div>
+          <h3>Add the dependency</h3>
+          <p>In your game's <code>Cargo.toml</code>:</p>
+<pre><code><span class="tok-k">[dependencies]</span>
+bevy_atmos = { git = <span class="tok-s">"https://github.com/Nilbong/bevy_atmos"</span> }</code></pre>
+        </div></div>
+        <div class="step"><div>
+          <h3>Add the plugin and tag your camera and sun</h3>
+          <p>The level's name names its saved look; the folder is where looks go.</p>
+<pre><code><span class="tok-k">use</span> bevy::prelude::*;
+<span class="tok-k">use</span> bevy_atmos::{<span class="tok-t">AtmosCamera</span>, <span class="tok-t">AtmosPlugin</span>, <span class="tok-t">AtmosSun</span>};
+
+<span class="tok-k">fn</span> main() {
+    <span class="tok-t">App</span>::new()
+        .add_plugins((<span class="tok-t">DefaultPlugins</span>, <span class="tok-t">AtmosPlugin</span>::new(<span class="tok-s">"my_level"</span>, <span class="tok-s">"looks"</span>)))
+        .add_systems(<span class="tok-t">Startup</span>, setup)
+        .run();
+}
+
+<span class="tok-k">fn</span> setup(<span class="tok-k">mut</span> commands: <span class="tok-t">Commands</span>) {
+    commands.spawn((<span class="tok-t">Camera3d</span>::default(), bevy::camera::<span class="tok-t">Hdr</span>, <span class="tok-t">AtmosCamera</span>));
+    commands.spawn((<span class="tok-t">DirectionalLight</span> { shadow_maps_enabled: <span class="tok-k">true</span>, ..default() }, <span class="tok-t">AtmosSun</span>));
+}</code></pre>
+        </div></div>
+        <div class="step"><div>
+          <h3>Run your game and press F9</h3>
+          <p>Pick a preset, move some sliders and press Save. The look is written to <code>looks/my_level.txt</code>.</p>
+        </div></div>
+      </div>
+      <div>
+        <div class="panel">
+          <h3>Just want to see it first?</h3>
+          <p>Clone the repo and run the demo scene: a few boxes, a pool and a river under the full sky.</p>
+<pre><code>git clone https://github.com/Nilbong/bevy_atmos
+cd bevy_atmos
+cargo run --release --example demo</code></pre>
+          <div class="keys">
+            <div><kbd>F9</kbd> &nbsp;look editor</div>
+            <div><kbd>F8</kbd> &nbsp;fly camera</div>
+            <div><kbd>H</kbd> &nbsp;hold to compare</div>
+            <div><kbd>Ctrl</kbd>+<kbd>S</kbd> &nbsp;save the look</div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <h3>Saved looks are plain text</h3>
+<pre><code><span class="tok-c"># my_level's look (bevy_atmos)</span>
+time.hour = <span class="tok-s">17.5</span>
+sky.cover = <span class="tok-s">0.6</span>
+weather.rain = <span class="tok-s">0.4</span></code></pre>
+          <p>Only what you changed is written. Set the <code>AtmosLevel</code> resource when the level changes and its look loads. Ship looks inside your game with <code>AtmosSettings::builtin</code>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="integrate">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">Get it running in your project</div>
+      <h2>Opt in to the parts you want</h2>
+      <p class="lead">The sky, clouds, fog, shafts, rain, snow and grade work with just the camera and sun tagged. These make the rest of your level join in.</p>
+    </div>
+    <div class="integ">
+      <div class="panel"><h3>Wet surfaces <code>WetMaterial</code></h3><p>A <code>StandardMaterial</code> extension. Use <code>Wet::ground()</code> for floors that collect puddles and <code>Wet::surface()</code> for walls and props.</p></div>
+      <div class="panel"><h3>Water <code>AtmosWater</code></h3><p>Put it on each water mesh. With <em>Modern water</em> on, Atmos draws modern water over it; turn it off and your own water shows again.</p></div>
+      <div class="panel"><h3>Rivers <code>WaterFlow</code></h3><p>Beside <code>AtmosWater</code>, the water keeps the mesh's slope and flows: from your texture's UV scroll, a UV axis, a world velocity or a flow map. You can also paint flow in the editor.</p></div>
+      <div class="panel"><h3>Shelter map <code>weather::Shelter</code></h3><p>A heights image so rain stops at roofs and drips off their edges. Without one, rain falls everywhere.</p></div>
+      <div class="panel"><h3>Reflections <code>SSR</code></h3><p>On by default for the tagged camera (it adds a depth prepass). Tune it or turn it off on the Fog &amp; Light tab.</p></div>
+      <div class="panel"><h3>Your own systems <code>knobs::get</code></h3><p>Read any value anywhere, e.g. <code>knobs::get("weather.rain", 0.0)</code>. Skip your mouse look while <code>editor::open()</code> is true.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="limits" class="alt">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">Limitations</div>
+      <h2>What it doesn't do (yet)</h2>
+      <p class="lead">Honest notes, so nothing surprises you.</p>
+    </div>
+    <ul class="limits">
+      <li><b>One camera, one sun</b>The first <code>AtmosCamera</code> and <code>AtmosSun</code>. No split-screen yet.</li>
+      <li><b>Flat water plus waves</b>Modern water is a grid over each water mesh's top, so very large seas get coarser waves. Rivers keep their slope.</li>
+      <li><b>No waterfalls</b>Rivers flow down slopes, but water falling over an edge isn't handled yet.</li>
+      <li><b>River underwater fog needs CPU mesh data</b>Meshes kept only on the GPU get no underwater fog in rivers.</li>
+      <li><b>Cloud smear on fast turns</b>Clouds update a quarter of their pixels a frame, so a very fast turn smears briefly at the screen edge.</li>
+      <li><b>Reflections are screen-space</b>They show only what's on screen; past the edge, water reflects the sky.</li>
+      <li><b>Lightmaps stay put</b>Baked lighting doesn't follow the time of day; dynamic lights, sky, fog and shafts do.</li>
+      <li><b>Cost</b>In the demo at 1280x720, clouds take about 0.1 to 0.3 ms of GPU time a frame and the sky about 0.15 ms. Lower <em>Cloud quality</em> on slower GPUs.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap" style="max-width:820px">
+    <div class="head">
+      <div class="eyebrow">FAQ</div>
+      <h2>Troubleshooting</h2>
+    </div>
+    <details><summary>The sky is black or far too bright.</summary><p>Add <code>bevy::camera::Hdr</code> to the camera with <code>AtmosCamera</code>. The sky's brightness is in real units.</p></details>
+    <details><summary>My camera spins when I drag a slider.</summary><p>Your mouse look is still running. Skip it while <code>bevy_atmos::editor::open()</code> or <code>flycam::active()</code> is true.</p></details>
+    <details><summary>My water didn't change.</summary><p>Turn on <em>Modern water</em> on the Water tab, and make sure the water mesh entity has <code>AtmosWater</code>.</p></details>
+    <details><summary>My saved look didn't load.</summary><p>It's <code>&lt;save_dir&gt;/&lt;level&gt;.txt</code>, relative to the folder the game runs from, and the name must match <code>AtmosLevel</code>. The log prints <code>atmos: N knobs for &lt;level&gt;</code> on load.</p></details>
+    <details><summary>It's slow on my laptop.</summary><p>Lower <em>Cloud quality</em> or turn <em>Volumetric clouds</em> off (Sky &amp; Clouds &gt; Advanced), and lower <em>Sun shaft quality</em> (Fog &amp; Light &gt; Advanced).</p></details>
+  </div>
+</section>
+
+<section id="licence" class="alt">
+  <div class="wrap licence">
+    <div class="eyebrow">Licence</div>
+    <h2>Free and open, for any project</h2>
+    <p class="lead">bevy_atmos is dual-licensed under MIT or Apache-2.0, the same as Bevy. Use it in any game, commercial or not, without asking.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/Nilbong/bevy_atmos">Get it on GitHub</a>
+      <a class="btn ghost" href="https://github.com/Nilbong/bevy_atmos#readme">Read the README</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>bevy_atmos by <a href="https://github.com/Nilbong">Nilbong</a> &middot; built on <a href="https://bevyengine.org">Bevy</a></span>
+    <span><a href="https://github.com/Nilbong/bevy_atmos/blob/main/LICENSE-MIT">MIT</a> or <a href="https://github.com/Nilbong/bevy_atmos/blob/main/LICENSE-APACHE">Apache-2.0</a> &middot; <a href="https://github.com/Nilbong/bevy_atmos/issues">Report an issue</a></span>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('pre').forEach(function (pre) {
+  var b = document.createElement('button');
+  b.className = 'copy'; b.type = 'button'; b.textContent = 'Copy';
+  b.addEventListener('click', function () {
+    var text = pre.querySelector('code').innerText;
+    var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+  });
+  pre.appendChild(b);
+});
+</script>
+</body>
+</html>
