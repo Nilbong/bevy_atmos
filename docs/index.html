@@ -196,6 +196,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
       Atmos
     </a>
     <ul>
+      <li><a href="#new">What's new</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#editor">Editor</a></li>
       <li><a href="#gallery">Gallery</a></li>
@@ -213,7 +214,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
   <div class="sun-dot"></div>
   <div class="wrap">
     <div>
-      <div class="eyebrow">bevy_atmos &middot; for Bevy 0.19</div>
+      <div class="eyebrow">bevy_atmos 0.2 &middot; for Bevy 0.19</div>
       <h1><span>Atmos</span></h1>
       <p class="tag">Sky, weather and water for Bevy</p>
       <p class="lead">Time of day, a physical sky with volumetric clouds, rain and snow that soak the ground, modern water with flowing rivers, fog, sun shafts and a colour grade. Add it in one line, then tune it live in your game from an editor anyone can use.</p>
@@ -237,6 +238,24 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
     <pre><code><span class="tok-t">App</span>::new().add_plugins((<span class="tok-t">DefaultPlugins</span>, <span class="tok-t">AtmosPlugin</span>::new(<span class="tok-s">"my_level"</span>, <span class="tok-s">"looks"</span>)))</code></pre>
   </div>
 </div>
+
+<section id="new">
+  <div class="wrap">
+    <div class="head">
+      <div class="eyebrow">What's new in 0.2</div>
+      <h2>Better clouds, real shadows, water everywhere</h2>
+      <p class="lead">0.2 grew out of using Atmos inside two real game projects. Here's what changed since 0.1.</p>
+    </div>
+    <div class="grid">
+      <div class="feature"><h3>One cloud system, better clouds</h3><p>Clouds now come from a single system, so one set of sliders drives every cloud you see. They build into taller, more varied towers, with smoother edges and no banding.</p></div>
+      <div class="feature"><h3>New Shadows tab</h3><p>Contact shadows, ambient occlusion and shadow softness for each level. Soft, sun-sized shadows (PCSS) are available with the optional <code>pcss</code> feature.</p></div>
+      <div class="feature"><h3>Water just works</h3><p>Water meshes are found automatically in any game, not just the demo. Click <b>Mark water</b> in the editor to add anything it missed, and pick a kind: lake, river or puddle.</p></div>
+      <div class="feature"><h3>Reflections</h3><p>Screen-space reflections on water and wet ground. Higher-resolution foam, plus rain rings on water.</p></div>
+      <div class="feature"><h3>Puddles that make sense</h3><p>Puddles only form where rain can actually reach, so none appear under roofs or bridges. Their edges are smooth, with no square corners.</p></div>
+      <div class="feature"><h3>Sturdier</h3><p>No more crashes when your game despawns things Atmos is tracking. The docs and screenshots are updated too.</p></div>
+    </div>
+  </div>
+</section>
 
 <section id="features">
   <div class="wrap">
@@ -351,7 +370,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
           <h3>Add the dependency</h3>
           <p>In your game's <code>Cargo.toml</code>:</p>
 <pre><code><span class="tok-k">[dependencies]</span>
-bevy_atmos = { git = <span class="tok-s">"https://github.com/Nilbong/bevy_atmos"</span> }</code></pre>
+bevy_atmos = { git = <span class="tok-s">"https://github.com/Nilbong/bevy_atmos"</span>, tag = <span class="tok-s">"v0.2.0"</span> }</code></pre>
         </div></div>
         <div class="step"><div>
           <h3>Add the plugin</h3>

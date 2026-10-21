@@ -143,7 +143,7 @@ Exposure, warmth, tint, contrast and saturation, applied as the last step.
 
    ```toml
    [dependencies]
-   bevy_atmos = { git = "https://github.com/Nilbong/bevy_atmos" }
+   bevy_atmos = { git = "https://github.com/Nilbong/bevy_atmos", tag = "v0.2.0" }
    ```
 
 2. Add the plugin (one line). That's all most games need: Atmos uses your
