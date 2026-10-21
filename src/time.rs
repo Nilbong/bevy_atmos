@@ -135,7 +135,9 @@ fn drive(
         let m = Quat::from_rotation_y(turn + 0.3) * path_dir(tod.hours + 12.0, latitude);
         Vec3::new(m.x, m.y + 0.1, m.z).normalize()
     };
-    tod.night = if tod.clocked { 1.0 - smooth((sun.y + 0.1) / 0.15) } else { 0.0 };
+    // (Twilight lasts: the sky keeps its glow with the sun a few degrees
+    // down, full night past about 11 degrees (nautical dusk).)
+    tod.night = if tod.clocked { 1.0 - smooth((sun.y + 0.2) / 0.22) } else { 0.0 };
     // Redder and dimmer low down (air mass), as bright as the host's at its hour.
     let m = 1.0 / sun.y.max(0.035);
     let red = Vec3::new((-0.03 * m).exp(), (-0.07 * m).exp(), (-0.16 * m).exp());
@@ -173,7 +175,7 @@ fn drive(
     if let Some(a) = ambient.as_mut() {
         let base = *ambient_base.get_or_insert(a.brightness);
         let share = if tod.clocked { (0.25 + 0.75 * (1.0 - tod.night)) * (0.4 + 0.6 * smooth((sun.y + 0.02) / 0.19)) } else { 1.0 };
-        let want = base * share * crate::knobs::get("sky.light", 1.0).clamp(0.0, 10.0);
+        let want = base * share * crate::knobs::get("sky.light", 1.0).clamp(0.0, 10.0) * crate::shadows::fill();
         if (a.brightness - want).abs() > 1e-3 {
             a.brightness = want;
         }

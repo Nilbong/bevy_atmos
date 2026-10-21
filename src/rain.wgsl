@@ -118,7 +118,9 @@ fn vertex(@location(0) v: vec3<f32>) -> Out {
         if k == 6 && all(abs(off) < SNOW_NEAR) {
             return hidden(out);
         }
-        if p.y < height_at(p) {
+        // (Debug, `rain.shelter_debug`: sheltered flakes drawn red, not hidden.)
+        let sheltered = p.y < height_at(p);
+        if sheltered && light.w < 0.5 {
             return hidden(out);
         }
         let to_eye = eye - p;
@@ -149,7 +151,7 @@ fn vertex(@location(0) v: vec3<f32>) -> Out {
             let x = 1.0 - min(distance(p, lamp.xyz) / lamp.w, 1.0);
             glow += lamps[l * 2u + 1u].rgb * x * x;
         }
-        out.glow = glow;
+        out.glow = select(glow, vec3<f32>(-1.0), sheltered);
         out.clip = view.clip_from_world * vec4<f32>(world, 1.0);
         return out;
     }
@@ -285,6 +287,9 @@ fn fragment(in: Out) -> @location(0) vec4<f32> {
         // forward scatter, much less than rain's).
         let d = length(vec2<f32>(in.uv.x, in.uv.y * 2.0 - 1.0));
         a = smoothstep(1.0, 0.25, d);
+        if in.glow.x < -0.5 {
+            return vec4<f32>(vec3<f32>(4.0, 0.0, 0.0) * a * max(in.fade, 0.0), 0.0);
+        }
         let v = normalize(in.world - view.world_position);
         let cs = dot(v, normalize(key_dir.xyz));
         let g = 0.35;

@@ -31,7 +31,8 @@ fn ssr_depth(uv: vec2<f32>, size: vec2<f32>) -> f32 {
 // `params`: x strength (0 off), y roughness cutoff, z reach (m).
 fn screen_reflection(origin: vec3<f32>, r: vec3<f32>, roughness: f32, frag: vec2<f32>, params: vec4<f32>, history: texture_2d<f32>, history_sampler: sampler) -> vec4<f32> {
 #ifdef DEPTH_PREPASS
-    if (params.x <= 0.0) {
+    // (Off, or no frame to reflect yet.)
+    if (params.x <= 0.0 || params.w < 0.5) {
         return vec4(0.0);
     }
     let reach = params.z;
@@ -53,15 +54,22 @@ fn screen_reflection(origin: vec3<f32>, r: vec3<f32>, roughness: f32, frag: vec2
     let s_uv = s.xy * vec2(0.5, -0.5) + 0.5;
     let e_uv = e.xy * vec2(0.5, -0.5) + 0.5;
     // (A step per 8 pixels: the narrowing after a hit finds the edge.)
-    let steps = clamp(length((e_uv - s_uv) * size) / 8.0, 6.0, SSR_MAX_STEPS);
-    let jitter = ssr_hash(frag);
+    let steps = clamp(length((e_uv - s_uv) * size) / 8.0, 8.0, SSR_MAX_STEPS);
+    // (A narrow jitter: a full step's sparkled on mirror-flat water.)
+    let jitter = 0.5 + (ssr_hash(frag) - 0.5) * 0.3;
     var lo = 0.0;
+    var last = s_uv;
     for (var i = 1.0; i <= steps; i += 1.0) {
         let t = (i - 1.0 + jitter) / steps;
         let uv = mix(s_uv, e_uv, t);
         if (any(uv < vec2(0.0)) || any(uv > vec2(1.0))) {
-            return vec4(0.0);
+            // (Off the screen's edge: what's at the edge where it left (a
+            // wall beside the puddle, most often), faded, not nothing; the
+            // bright sky alone read wrong.)
+            let edge_c = textureSampleLevel(history, history_sampler, clamp(last, vec2(0.002), vec2(0.998)), 0.0).rgb;
+            return vec4(edge_c, 0.55 * smooth_enough * params.x * smoothstep(0.0, 0.3, t));
         }
+        last = uv;
         // Depth (reverse Z) runs straight in screen space.
         let ray_z = mix(s.z, e.z, t);
         let scene_z = ssr_depth(uv, size);

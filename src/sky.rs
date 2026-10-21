@@ -48,23 +48,15 @@ impl Plugin for SkyPlugin {
 const SIZE: u32 = 1024;
 /// A face is redrawn in this many strips, one a frame.
 const STRIPS: u32 = 16;
-/// The reflections' cube (with clouds) beside the screen-space clouds.
-const ENV_SIZE: u32 = 256;
-const ENV_STRIPS: u32 = 4;
-
-/// The screen-space clouds are on (the skybox cube has none).
-pub fn screen_clouds() -> bool {
-    crate::knobs::get("sky.screen_clouds", 1.0) >= 0.5
-}
+/// The reflections' cube (the sky with the clouds), drawn by
+/// `crate::clouds` from the same clouds the camera sees.
+const ENV_SIZE: u32 = crate::clouds::ENV_SIZE;
 
 #[derive(Resource, Clone, ExtractResource)]
 pub struct DynamicSky {
     image: Handle<Image>,
     /// The reflections' cube, with clouds (screen-space clouds on).
     env: Handle<Image>,
-    env_params: SkyParams,
-    env_rows: u32,
-    env_faces: u32,
     screen: bool,
     noise: Handle<Image>,
     classic: Handle<Image>,
@@ -80,10 +72,15 @@ pub struct DynamicSky {
 }
 
 impl DynamicSky {
-    /// The sky with its clouds, for reflections (and the skybox when the
-    /// screen-space clouds are off).
+    /// The sky with its clouds, for reflections and ambient (the sky alone
+    /// with the clouds off).
     pub fn image(&self) -> Handle<Image> {
         if self.screen { self.env.clone() } else { self.image.clone() }
+    }
+
+    /// The reflections' cube `crate::clouds` draws into.
+    pub(crate) fn env(&self) -> Handle<Image> {
+        self.env.clone()
     }
 
     /// What the camera's skybox shows (without clouds when they're drawn
@@ -154,9 +151,6 @@ fn create(mut commands: Commands, sky: Option<Res<DynamicSky>>, cameras: Query<O
     commands.insert_resource(DynamicSky {
         image: images.add(cube(SIZE, &[0; 8], TextureFormat::Rgba16Float, true)),
         env: images.add(cube(ENV_SIZE, &[0; 8], TextureFormat::Rgba16Float, true)),
-        env_params: SkyParams::default(),
-        env_rows: ENV_SIZE,
-        env_faces: 6,
         screen: false,
         noise: images.add(noise_image()),
         classic,
@@ -269,7 +263,10 @@ fn update(
     let darkness = knob("sky.darkness", 0.3 + 0.5 * storm).clamp(0.0, 1.0);
     let physical = knob("sky.physical", if sky.has_classic { 0.0 } else { 1.0 }) > 0.5;
     let night_key = tod.clocked && tod.night > 0.5;
-    let (key_dir, key_color) = if night_key { (tod.moon_dir, Vec3::new(0.62, 0.72, 1.0) * 0.2) } else { (tod.sun_dir, tod.sun_color * tod.sun_share.min(1.3)) };
+    // (The clouds, kilometres up, still see a sun a few degrees under the
+    // horizon: lit red at dusk while the ground is in shadow.)
+    let aloft = { let t = ((tod.sun_dir.y + 0.1) / 0.14).clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) } * 0.9;
+    let (key_dir, key_color) = if night_key { (tod.moon_dir, Vec3::new(0.62, 0.72, 1.0) * 0.2) } else { (tod.sun_dir, tod.sun_color * tod.sun_share.min(1.3).max(if tod.clocked { aloft } else { 0.0 })) };
     // Clouds drift at ~5 m/s (faster in the wind); every strip of a redraw
     // cycle takes the same moment, so strips never tear against each other.
     let speed = 5.0 + weather.wind.length();
@@ -277,7 +274,7 @@ fn update(
     if slice == 0 {
         *cycle = time.elapsed_secs() * speed;
     }
-    let screen = screen_clouds();
+    let screen = crate::clouds::quality() > 0;
     let look = [coverage, darkness, knob("sky.altitude", 0.0), knob("sky.tint", 0.0), knob("sky.brightness", 1.0), physical as u32 as f32 + 2.0 * screen as u32 as f32];
     let changed = look != sky.last;
     sky.last = look;
@@ -286,13 +283,6 @@ fn update(
         (6, SIZE, 0, 0)
     } else {
         (1, SIZE / STRIPS, slice / STRIPS, slice % STRIPS * SIZE / STRIPS)
-    };
-    // (The reflections' cube a strip a frame too, a quarter the strips.)
-    let env_slice = sky.frames % (6 * ENV_STRIPS);
-    let (env_faces, env_rows, env_face, env_row) = if sky.frames == 0 || changed {
-        (6, ENV_SIZE, 0, 0)
-    } else {
-        (1, ENV_SIZE / ENV_STRIPS, env_slice / ENV_STRIPS, env_slice % ENV_STRIPS * ENV_SIZE / ENV_STRIPS)
     };
     sky.faces = faces;
     sky.rows = rows;
@@ -326,11 +316,9 @@ fn update(
             let warm = look[3].clamp(-1.0, 1.0);
             (Vec3::new(1.0 + 0.25 * warm, 1.0, 1.0 - 0.25 * warm) * look[4].clamp(0.0, 4.0)).extend(1.0)
         },
-        clouds: if screen { 0.0 } else { 1.0 },
+        // (The clouds are `crate::clouds`', never this cube's.)
+        clouds: 0.0,
     };
-    sky.env_params = SkyParams { face_base: env_face, row_base: env_row, clouds: 1.0, ..sky.params };
-    sky.env_faces = env_faces;
-    sky.env_rows = env_rows;
     sky.frames += 1;
 }
 
@@ -409,10 +397,8 @@ fn prepare(
     commands.remove_resource::<SkyBindGroup>();
     let Some(sky) = sky.filter(|s| s.on) else { return };
     let (Some(classic), Some(noise)) = (images.get(&sky.classic), images.get(&sky.noise)) else { return };
-    let mut targets = vec![(&sky.image, sky.params, sky.faces, sky.rows)];
-    if sky.screen {
-        targets.push((&sky.env, sky.env_params, sky.env_faces, sky.env_rows));
-    }
+    // (The reflections' cube is `crate::clouds`', drawn from the clouds.)
+    let targets = vec![(&sky.image, sky.params, sky.faces, sky.rows)];
     let mut groups = Vec::new();
     for (image, params, faces, rows) in targets {
         let Some(out) = images.get(image) else { continue };

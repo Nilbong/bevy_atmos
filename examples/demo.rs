@@ -9,7 +9,8 @@
 //! knobs, `ATMOS_EDITOR=<tab>` opens the editor on a tab, and
 //! `ATMOS_SHOT=<file.png>` saves a screenshot a few seconds in and quits,
 //! `ATMOS_CAM="x,y,z,tx,ty,tz"` holds the camera at x,y,z looking at t.
-//! `ATMOS_SEQ="a.png@x,y,z,tx,ty,tz@k=v,k=v;b.png@..."` takes several
+//! `ATMOS_SEQ="a.png@x,y,z,tx,ty,tz@k=v,k=v;b.png@..."` (the plugin's
+//! `testshots`, any host) takes several
 //! shots in one launch (each 3 s after its camera and knobs are set) and
 //! quits; `ATMOS_PERF=1` logs the plugin's GPU pass times at each shot
 //! (and turns vsync off); `ATMOS_RES=640x360` a smaller window. In a
@@ -20,7 +21,7 @@
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy_atmos::wet::{Wet, WetMaterial};
-use bevy_atmos::{AtmosCamera, AtmosPlugin, AtmosSun};
+use bevy_atmos::{AtmosCamera, AtmosPlugin};
 
 fn main() {
     let mut app = App::new();
@@ -35,107 +36,11 @@ fn main() {
             ..default()
         }))
         .add_plugins(AtmosPlugin::new("demo", "looks"));
-    if perf() {
-        app.add_plugins((bevy::render::diagnostic::RenderDiagnosticsPlugin, bevy::diagnostic::FrameTimeDiagnosticsPlugin::default()));
-    }
-    app.init_resource::<Seq>().add_systems(Startup, setup).add_systems(Update, (sequence, orbit, shoot).chain()).run();
+    app.add_systems(Startup, setup).add_systems(Update, (orbit, shoot)).run();
 }
 
 fn perf() -> bool {
     std::env::var_os("ATMOS_PERF").is_some()
-}
-
-/// `ATMOS_SEQ`: the shots, the one now and when it began.
-#[derive(Resource, Default)]
-struct Seq {
-    shots: Vec<(String, Option<Transform>, Vec<(String, f32)>)>,
-    at: usize,
-    began: f32,
-    camera: Option<Transform>,
-    parsed: bool,
-    next: bool,
-}
-
-fn sequence(mut commands: Commands, time: Res<Time<Real>>, mut seq: ResMut<Seq>, mut editor: ResMut<bevy_atmos::editor::Editor>, diagnostics: Res<bevy::diagnostic::DiagnosticsStore>, mut exit: MessageWriter<AppExit>) {
-    if !seq.parsed {
-        seq.parsed = true;
-        let Ok(text) = std::env::var("ATMOS_SEQ") else { return };
-        for shot in text.split(';').filter(|s| !s.trim().is_empty()) {
-            let mut parts = shot.split('@');
-            let file = parts.next().unwrap_or("shot.png").trim().to_owned();
-            let cam = parts.next().map(|c| c.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 6);
-            let cam = cam.map(|v| Transform::from_xyz(v[0], v[1], v[2]).looking_at(Vec3::new(v[3], v[4], v[5]), Vec3::Y));
-            let knobs = parts.next().map(|k| bevy_atmos::knobs::parse(&k.replace(',', "\n")).into_iter().collect()).unwrap_or_default();
-            seq.shots.push((file, cam, knobs));
-        }
-        seq.began = time.elapsed_secs() + 2.0;
-        seq.at = usize::MAX;
-        return;
-    }
-    if seq.shots.is_empty() {
-        return;
-    }
-    let t = time.elapsed_secs();
-    if seq.at == usize::MAX {
-        if t < seq.began {
-            return;
-        }
-        seq.at = 0;
-        seq.began = t;
-        let (_, cam, knobs) = seq.shots[0].clone();
-        seq.camera = cam;
-        set_knobs(knobs, &mut editor);
-        return;
-    }
-    if seq.next {
-        seq.next = false;
-        let (_, cam, knobs) = seq.shots[seq.at].clone();
-        seq.camera = cam.or(seq.camera);
-        set_knobs(knobs, &mut editor);
-        return;
-    }
-    if seq.at == usize::MAX - 1 {
-        if t - seq.began > 1.0 {
-            exit.write(AppExit::Success);
-        }
-        return;
-    }
-    if t - seq.began < 3.0 {
-        return;
-    }
-    let (file, _, _) = seq.shots[seq.at].clone();
-    commands.spawn(Screenshot::primary_window()).observe(save_to_disk(file.clone()));
-    if perf() {
-        let get = |path: &'static str| diagnostics.get(&bevy::diagnostic::DiagnosticPath::const_new(path)).and_then(|d| d.average()).unwrap_or(0.0);
-        info!(
-            "atmos perf {file}: clouds {:.3} ms, sky {:.3} ms, frame {:.2} ms",
-            get("render/atmos_clouds/elapsed_gpu"),
-            get("render/atmos_sky/elapsed_gpu"),
-            get("frame_time")
-        );
-    }
-    seq.at += 1;
-    seq.began = t;
-    if seq.at >= seq.shots.len() {
-        // (A second for the last screenshot to be written.)
-        seq.at = usize::MAX - 1;
-        return;
-    }
-    // (The next shot's camera and knobs next frame: this frame renders the
-    // screenshot.)
-    seq.next = true;
-}
-
-/// A shot's knobs (`editor`, `editor_adv`: the editor).
-fn set_knobs(knobs: Vec<(String, f32)>, editor: &mut bevy_atmos::editor::Editor) {
-    for (k, v) in knobs {
-        match k.as_str() {
-            "editor" => editor.set_open(v >= 0.0, v.max(0.0) as usize),
-            "editor_adv" => editor.set_advanced(v > 0.0),
-            "preset" => bevy_atmos::editor::apply_preset(v as usize),
-            _ => bevy_atmos::knobs::set(&k, Some(v)),
-        }
-    }
 }
 
 fn res() -> (u32, u32) {
@@ -147,7 +52,23 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut wet: ResMut<Assets<WetMaterial>>,
     mut water: ResMut<Assets<bevy_atmos::water::WaterMaterial>>,
+    mut plain: ResMut<Assets<StandardMaterial>>,
 ) {
+    // A pond made as a game would make it (a glTF's "Pond Water" mesh): a
+    // plain material, no bevy_atmos tags. The plugin finds it by its name.
+    commands.spawn((
+        Name::new("Pond Water"),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(8.0, 6.0))),
+        MeshMaterial3d(plain.add(StandardMaterial { base_color: Color::srgba(0.1, 0.3, 0.32, 0.8), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.1, ..default() })),
+        Transform::from_xyz(17.0, 0.02, -13.0),
+    ));
+    // And a puddle (small: still and mirror-like).
+    commands.spawn((
+        Name::new("Puddle"),
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(2.4, 1.6))),
+        MeshMaterial3d(plain.add(StandardMaterial { base_color: Color::srgba(0.12, 0.12, 0.1, 0.8), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.1, ..default() })),
+        Transform::from_xyz(7.0, 0.015, 5.0),
+    ));
     let ground = wet.add(WetMaterial { base: StandardMaterial { base_color: Color::srgb(0.42, 0.4, 0.36), perceptual_roughness: 0.9, ..default() }, extension: Wet::ground() });
     let stone = wet.add(WetMaterial { base: StandardMaterial { base_color: Color::srgb(0.36, 0.35, 0.32), perceptual_roughness: 0.85, ..default() }, extension: Wet::surface() });
     // The ground, round a pool sunk in it (x -9..5, z 9..19).
@@ -223,10 +144,11 @@ fn setup(
     commands.spawn((
         DirectionalLight { illuminance: 12_000.0, shadow_maps_enabled: true, ..default() },
         Transform::default().looking_to(Vec3::new(-0.4, -0.6, -0.5), Vec3::Y),
-        AtmosSun,
     ));
     commands.insert_resource(GlobalAmbientLight { brightness: 800.0, ..default() });
-    commands.spawn((Camera3d::default(), bevy::camera::Hdr, Transform::from_xyz(0.0, 3.0, 26.0).looking_at(Vec3::new(0.0, 3.0, 0.0), Vec3::Y), AtmosCamera));
+    commands.spawn((Camera3d::default(), bevy::camera::Hdr, Transform::from_xyz(0.0, 3.0, 26.0).looking_at(Vec3::new(0.0, 3.0, 0.0), Vec3::Y)));
+    // (No AtmosSun or AtmosCamera tags: the plugin picks the brightest
+    // light and the only 3D camera itself.)
     // Debug: knobs and the editor from the environment (screenshots).
     if let Ok(set) = std::env::var("ATMOS_SET") {
         for (k, v) in bevy_atmos::knobs::parse(&set.replace(';', "\n")) {
@@ -236,13 +158,7 @@ fn setup(
 }
 
 /// A slow turn round the scene until the fly camera takes over.
-fn orbit(time: Res<Time>, seq: Res<Seq>, mut cameras: Query<&mut Transform, With<AtmosCamera>>) {
-    if let Some(at) = seq.camera {
-        for mut t in &mut cameras {
-            *t = at;
-        }
-        return;
-    }
+fn orbit(time: Res<Time>, mut cameras: Query<&mut Transform, With<AtmosCamera>>) {
     if bevy_atmos::flycam::active() || bevy_atmos::editor::open() && std::env::var_os("ATMOS_SHOT").is_none() {
         return;
     }

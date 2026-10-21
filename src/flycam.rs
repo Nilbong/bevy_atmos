@@ -59,6 +59,13 @@ impl Flycam {
         self.want = true;
     }
 
+    /// Puts the fly camera at `pos`, facing `yaw` and `pitch` (radians),
+    /// flying already or not.
+    pub fn place(&mut self, pos: Vec3, yaw: f32, pitch: f32) {
+        self.want = true;
+        self.at = Some((pos, yaw, pitch));
+    }
+
     /// Flies from `pos`, facing `yaw` and `pitch` (radians).
     pub fn enter_at(&mut self, pos: Vec3, yaw: f32, pitch: f32) {
         self.want = true;
@@ -127,6 +134,10 @@ fn fly(
     }
     if !f.on {
         return;
+    }
+    // (Placed while flying.)
+    if let Some((pos, yaw, pitch)) = f.at.take() {
+        (f.pos, f.yaw, f.pitch) = (pos, yaw, pitch);
     }
     let dt = time.delta_secs().min(0.1);
     let flying = !f.hold_to_fly || buttons.pressed(MouseButton::Right);

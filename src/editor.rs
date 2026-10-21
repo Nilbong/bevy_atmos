@@ -1,5 +1,5 @@
-//! The look editor: F9 opens a side panel of sliders in six tabs (Time &
-//! Sun, Sky & Clouds, Weather, Water, Fog & Light, Colour), each with its
+//! The look editor: F9 opens a side panel of sliders in seven tabs (Time &
+//! Sun, Sky & Clouds, Weather, Water, Fog & Light, Shadows, Colour), each with its
 //! everyday settings first and the rest under "Advanced". Each slider is a
 //! knob ([`crate::knobs`]); changes apply live, the game keeps running.
 //!
@@ -87,6 +87,9 @@ enum Auto {
     SunAz,
     SunEl,
     Wetness,
+    /// Unset means "left as the host has it": shown as this word, not as a
+    /// number.
+    Unset(&'static str),
 }
 
 /// How a value reads.
@@ -105,6 +108,8 @@ enum Unit {
     Balance(&'static str, &'static str),
     /// Metres, 0 the game's own.
     FogDistance,
+    /// Whole steps, by name (0 the first).
+    Named(&'static [&'static str]),
 }
 
 struct Def {
@@ -127,12 +132,13 @@ struct Tab {
     hint: &'static str,
 }
 
-const TABS: [Tab; 6] = [
+const TABS: [Tab; 7] = [
     Tab { name: "Time & Sun", hint: "What time it is and where the sun sits. Light and sky follow the clock." },
     Tab { name: "Sky & Clouds", hint: "How much cloud there is, how grey it is, and the sky's colour." },
     Tab { name: "Weather", hint: "Rain, snow and wind, and how wet the ground gets." },
-    Tab { name: "Water", hint: "Colour, waves, foam and rivers. Turn on Modern water first." },
+    Tab { name: "Water", hint: "Finding the level's water, then its colour, waves, foam and rivers." },
     Tab { name: "Fog & Light", hint: "Haze in the distance, sun shafts and reflections." },
+    Tab { name: "Shadows", hint: "Shadow softness, reach and darkness, contact shadows and ambient occlusion. Unset keeps your game's own." },
     Tab { name: "Colour", hint: "The final picture: brightness, warmth, contrast and saturation." },
 ];
 
@@ -168,10 +174,13 @@ const DEFS: &[Def] = &[
     d(1, B, "Sky brightness", "sky.brightness", 0.0, 3.0, 0.05, 1.0, N, PCT, "How bright the sky itself looks."),
     d(1, A, "Dynamic sky", "sky.enabled", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "Off: the game's own sky image, untouched (and none of the clouds below)."),
     d(1, A, "Physical sky colours", "sky.physical", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "On: the sky's colours come from the sun's position (sunsets go orange). Off: from the game's sky image."),
-    d(1, A, "Volumetric clouds", "sky.screen_clouds", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "On: 3D clouds traced per pixel (best looking). Off: cheaper clouds painted into the sky."),
+    d(1, A, "Cloud quality", "clouds.quality", 0.0, 3.0, 1.0, 2.0, N, Unit::Named(&["Off", "Low", "Medium", "High"]), "How finely the clouds are traced: higher looks smoother and costs more. Off: no clouds at all."),
     d(1, A, "Cloud thickness", "clouds.density", 0.0, 3.0, 0.05, 1.0, N, PCT, "How dense each cloud is: thin and see-through, or thick and solid."),
     d(1, A, "Cloud wispiness", "clouds.erosion", 0.0, 2.0, 0.05, 1.0, N, PCT, "Fine detail eating into cloud edges."),
-    d(1, A, "Cloud quality", "clouds.resolution", 0.125, 1.0, 0.125, 0.5, N, PCT, "The clouds' resolution, as a share of the screen's. Lower is faster."),
+    d(1, A, "Cloud resolution", "clouds.resolution", 0.125, 1.0, 0.125, 0.5, Auto::Unset("From quality"), PCT, "Overrides the resolution Cloud quality picks, as a share of the screen's. Lower is faster."),
+    d(1, A, "Sunlight on clouds", "clouds.light", 0.0, 4.0, 0.05, 2.8, N, PCT, "How brightly the sun lights the clouds' billows."),
+    d(1, A, "Cloud shading", "clouds.shadow", 0.0, 8.0, 0.1, 2.0, N, n("x", 1), "How dark the clouds' shaded sides go (their own shadow)."),
+    d(1, A, "Sky light on clouds", "clouds.ambient", 0.0, 4.0, 0.05, 0.45, N, PCT, "The sky's fill light on the clouds, mostly from above."),
     d(1, A, "Cloud height", "sky.altitude", -1000.0, 4000.0, 50.0, 0.0, N, n("m", 0), "Raises or lowers the cloud layer."),
     d(1, A, "Cloud position", "sky.offset", 0.0, 20000.0, 100.0, 0.0, N, n("m", 0), "Slides the cloud pattern, to move a cloud out of (or into) a shot."),
     // Weather
@@ -184,15 +193,20 @@ const DEFS: &[Def] = &[
     d(2, A, "Rain brightness", "rain.brightness", 0.0, 4.0, 0.05, 1.0, N, PCT, "How much the rain catches the light."),
     d(2, A, "Rain near the camera", "rain.near", 0.0, 1.0, 0.02, 1.0, N, PCT, "The streaks closest to the camera."),
     d(2, A, "Rain in the distance", "rain.far", 0.0, 1.0, 0.02, 0.7, N, PCT, "The streaks further off, that read as a sheet of rain."),
+    d(2, A, "Keep rain out from under roofs", "rain.shelter", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "Atmos looks down from above the player to find roofs, awnings and trees, so rain doesn't fall indoors. Off: rain everywhere (except on water). A game's own shelter map always wins."),
+    d(2, A, "Roof search height", "rain.shelter_height", 5.0, 200.0, 5.0, 60.0, N, n("m", 0), "How far above the camera the roof search starts. Raise it under very tall roofs."),
     d(2, A, "Puddles", "wet.puddles", 0.0, 2.0, 0.05, 1.0, N, PCT, "How much standing water collects on wet ground."),
     d(2, A, "Soaked darkening", "wet.darken", 0.0, 2.0, 0.05, 1.0, N, PCT, "How much darker surfaces get as they soak."),
     // Water
-    d(3, B, "Modern water", "water.replace", 0.0, 1.0, 1.0, 0.0, N, Unit::Toggle, "On: the level's water is replaced by modern water (waves, foam, reflections, rivers). Off: the original."),
+    d(3, B, "Modern water", "water.replace", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "On (the default): the level's water is replaced by modern water (waves, foam, reflections, rivers). Off: the original."),
+    d(3, B, "Find water automatically", "water.auto", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "Meshes named water, sea, ocean, river, lake, pool, pond, canal or puddle become water by themselves. Off: only water you tag or mark."),
+    d(3, B, "Guess water from materials", "water.guess", 0.0, 1.0, 1.0, 0.0, N, Unit::Toggle, "Also treats flat, level, smooth or see-through blue-green surfaces as water. Can catch glass: check, and use Mark water to fix mistakes."),
     d(3, B, "Water colour", "water.tint", -1.0, 1.0, 0.05, 0.0, N, Unit::Balance("bluer", "browner"), "From clear blue to murky green-brown."),
     d(3, B, "Water brightness", "water.brightness", 0.0, 2.0, 0.05, 1.0, N, PCT, "How light or dark the water's own colour is."),
     d(3, B, "Wave height", "water.wave_height", 0.0, 2.0, 0.02, 0.3, N, n("m", 2), "How tall the waves are."),
     d(3, B, "Wave speed", "water.wave_speed", 0.0, 3.0, 0.05, 1.0, N, n("x", 2), "How fast the waves roll."),
     d(3, B, "Foam", "water.foam", 0.0, 3.0, 0.05, 1.0, N, PCT, "White foam where the water meets the shore and objects."),
+    d(3, A, "River silt", "water.sediment", 0.0, 1.0, 0.05, 0.6, N, PCT, "Rivers only: leans the water toward a silty earth colour that swallows blue first, so a river fits a desert or forest. 0: clear."),
     d(3, B, "River speed", "water.flow_speed", 0.0, 4.0, 0.05, 1.0, N, n("x", 2), "How fast every river flows."),
     d(3, A, "Murk through depth", "water.absorption", 0.0, 4.0, 0.05, 1.0, N, PCT, "How quickly deep water hides what's below it."),
     d(3, A, "Choppiness", "water.choppiness", 0.0, 1.0, 0.02, 0.4, N, PCT, "Sharp, pointed waves instead of smooth swells."),
@@ -223,12 +237,23 @@ const DEFS: &[Def] = &[
     d(4, A, "Screen reflections", "ssr.enabled", 0.0, 1.0, 1.0, 1.0, N, Unit::Toggle, "Off: no screen-space reflections at all (a little faster)."),
     d(4, A, "Reflection roughness limit", "ssr.roughness", 0.02, 1.0, 0.02, 0.45, N, PCT, "Surfaces rougher than this don't take reflections."),
     d(4, A, "Reflection distance", "ssr.distance", 2.0, 200.0, 1.0, 30.0, N, n("m", 0), "How far reflections reach."),
+    // Shadows (each unset: the game's own setup, untouched)
+    d(5, B, "Shadow darkness", "shadows.strength", 0.0, 1.0, 0.05, 1.0, Auto::Unset("Unset"), PCT, "How dark shadows are. Lower lets more sky light fill them."),
+    d(5, B, "Shadow softness", "shadows.softness", 0.0, 1.0, 0.05, 0.5, Auto::Unset("Unset"), PCT, "Shadow edges: below 30% hard and crisp, above that soft (true soft shadows with the pcss feature)."),
+    d(5, B, "Shadow distance", "shadows.distance", 10.0, 1000.0, 10.0, 150.0, Auto::Unset("Unset"), n("m", 0), "How far from the camera the sun still casts shadows. Shorter is sharper and cheaper."),
+    d(5, B, "Contact shadows", "shadows.contact", 0.0, 1.0, 1.0, 0.0, Auto::Unset("Unset"), Unit::Toggle, "Small sharp shadows where things touch the ground."),
+    d(5, B, "Ambient occlusion", "ssao.enabled", 0.0, 1.0, 1.0, 0.0, Auto::Unset("Unset"), Unit::Toggle, "Darkens corners and creases. Turns the camera's MSAA off while on (Bevy needs that)."),
+    d(5, A, "Contact shadow length", "shadows.contact_length", 0.02, 2.0, 0.02, 0.3, Auto::Unset("Unset"), n("m", 2), "How far contact shadows reach."),
+    d(5, A, "Shadow cascades", "shadows.cascades", 1.0, 4.0, 1.0, 4.0, Auto::Unset("Unset"), n("", 0), "How many shadow maps cover the distance. More is sharper up close and costs more."),
+    d(5, A, "Ambient occlusion quality", "ssao.quality", 0.0, 3.0, 1.0, 2.0, Auto::Unset("Unset"), Unit::Named(&["Low", "Medium", "High", "Ultra"]), "Higher is smoother and costs more."),
+    d(5, A, "Occlusion in sunlight", "ssao.direct", 0.0, 1.0, 0.05, 0.8, N, PCT, "How much ambient occlusion also darkens sunlit places. 0: only the shadowed, sky-lit parts (Bevy's own)."),
+    d(5, A, "Occlusion contrast", "ssao.contrast", 0.5, 4.0, 0.05, 1.6, N, n("x", 2), "How deep the creases and corners go."),
     // Colour
-    d(5, B, "Exposure", "grade.exposure", -3.0, 3.0, 0.05, 0.0, N, n("stops", 2), "Brightens or darkens the whole picture, like a camera's exposure."),
-    d(5, B, "Warmth", "grade.warmth", -0.3, 0.3, 0.01, 0.0, N, WARM, "Tints the whole picture: warmer is orange, cooler is blue."),
-    d(5, B, "Tint", "grade.tint", -0.3, 0.3, 0.01, 0.0, N, Unit::Balance("greener", "pinker"), "Tints the whole picture between green and magenta."),
-    d(5, B, "Contrast", "grade.contrast", 0.5, 2.0, 0.02, 1.0, N, PCT, "The gap between darks and lights."),
-    d(5, B, "Saturation", "grade.saturation", 0.0, 2.0, 0.02, 1.0, N, PCT, "How colourful the picture is. 0 is black and white."),
+    d(6, B, "Exposure", "grade.exposure", -3.0, 3.0, 0.05, 0.0, N, n("stops", 2), "Brightens or darkens the whole picture, like a camera's exposure."),
+    d(6, B, "Warmth", "grade.warmth", -0.3, 0.3, 0.01, 0.0, N, WARM, "Tints the whole picture: warmer is orange, cooler is blue."),
+    d(6, B, "Tint", "grade.tint", -0.3, 0.3, 0.01, 0.0, N, Unit::Balance("greener", "pinker"), "Tints the whole picture between green and magenta."),
+    d(6, B, "Contrast", "grade.contrast", 0.5, 2.0, 0.02, 1.0, N, PCT, "The gap between darks and lights."),
+    d(6, B, "Saturation", "grade.saturation", 0.0, 2.0, 0.02, 1.0, N, PCT, "How colourful the picture is. 0 is black and white."),
 ];
 
 /// The presets: knobs each sets (`None`: back to the default). They all set
@@ -348,7 +373,7 @@ fn value(def: &Def, now: &Now) -> (f32, bool) {
         Auto::SunAz => now.sun.0,
         Auto::SunEl => now.sun.1,
         Auto::Wetness => now.wetness,
-        Auto::No => crate::knobs::default_of(def.key).unwrap_or(def.fallback),
+        Auto::No | Auto::Unset(_) => crate::knobs::default_of(def.key).unwrap_or(def.fallback),
     };
     (v, false)
 }
@@ -380,6 +405,7 @@ fn format(def: &Def, v: f32, set: bool) -> String {
             let share = (v / def.max.abs().max(1e-6) * 100.0).round();
             if share == 0.0 { "Neutral".into() } else { format!("{:.0}% {}", share.abs(), if share < 0.0 { neg } else { pos }) }
         }
+        Unit::Named(names) => names.get(v.round().max(0.0) as usize).copied().unwrap_or("?").to_owned(),
         Unit::Num(unit, decimals) => {
             let num = format!("{v:.decimals$}");
             match unit {
@@ -389,7 +415,12 @@ fn format(def: &Def, v: f32, set: bool) -> String {
             }
         }
     };
-    if set || def.auto == Auto::No { s } else { format!("{s} (now)") }
+    match def.auto {
+        _ if set => s,
+        Auto::No => s,
+        Auto::Unset(word) => word.to_owned(),
+        _ => format!("{s} (now)"),
+    }
 }
 
 fn now_of(tod: &crate::time::TimeOfDay, weather: &crate::weather::Weather) -> Now {
@@ -417,7 +448,16 @@ enum Btn {
     Close,
     PaintFlow,
     ClearFlow,
+    MarkWater,
+    /// What a Mark water click does: 0 toggle water, else set the kind.
+    MarkKind(usize),
 }
+
+/// The Mark water tool's choices: toggle water, or set a kind.
+const MARK_KINDS: [(&str, Option<crate::modern_water::WaterKind>); 5] = {
+    use crate::modern_water::WaterKind::*;
+    [("Toggle water", None), ("Puddle", Some(Puddle)), ("Pond", Some(Pond)), ("River", Some(River)), ("Sea", Some(Sea))]
+};
 
 #[derive(Component)]
 struct Track(usize);
@@ -450,6 +490,14 @@ struct Status;
 
 #[derive(Component)]
 struct Help;
+
+/// The Shadows tab's ambient occlusion note.
+#[derive(Component)]
+struct AoNote;
+
+/// The Water tab's "no water" note.
+#[derive(Component)]
+struct NoWater;
 
 const PANEL: Color = Color::srgba(0.055, 0.07, 0.075, 0.86);
 const RAISED: Color = Color::srgba(0.12, 0.14, 0.15, 0.95);
@@ -509,6 +557,12 @@ fn build(commands: &mut Commands, e: &Editor) {
                 }
             });
             p.spawn((text(TABS[e.tab].hint, 12.0, INK_DIM), Node { margin: UiRect::axes(Val::Px(2.0), Val::Px(2.0)), ..default() }));
+            if e.tab == 5 {
+                p.spawn((AoNote, text("", 12.0, WARN), Node { margin: UiRect::horizontal(Val::Px(2.0)), ..default() }));
+            }
+            if e.tab == 3 {
+                p.spawn((NoWater, text("", 12.0, WARN), Node { margin: UiRect::horizontal(Val::Px(2.0)), ..default() }));
+            }
             // Presets (line 0).
             p.spawn((RowBg(0), RelativeCursorPosition::default(), Node { flex_direction: FlexDirection::Column, padding: UiRect::all(Val::Px(4.0)), ..default() }, BackgroundColor(ROW))).with_children(|row| {
                 row.spawn(text("Start from a preset", 12.0, INK_DIM));
@@ -609,6 +663,16 @@ fn build(commands: &mut Commands, e: &Editor) {
                 button(r, "Fly camera (F8)", Btn::Fly, false);
                 button(r, "Close (F9)", Btn::Close, false);
                 if e.tab == 3 {
+                    button(r, if crate::auto::marking() { "Marking water: click surfaces" } else { "Mark water" }, Btn::MarkWater, crate::auto::marking());
+                    if crate::auto::marking() {
+                        // (What a click does: toggle water, or set its kind.)
+                        r.spawn(Node { width: Val::Percent(100.0), flex_wrap: FlexWrap::Wrap, align_items: AlignItems::Center, ..default() }).with_children(|k| {
+                            k.spawn((text("A click:", 12.0, INK_DIM), Node { margin: UiRect::horizontal(Val::Px(4.0)), ..default() }));
+                            for (i, (name, kind)) in MARK_KINDS.iter().enumerate() {
+                                button(k, name, Btn::MarkKind(i), crate::auto::mark_kind() == *kind);
+                            }
+                        });
+                    }
                     button(r, if crate::flow::painting() { "Painting river flow: on" } else { "Paint river flow" }, Btn::PaintFlow, crate::flow::painting());
                     button(r, "Clear painted flow", Btn::ClearFlow, false);
                 }
@@ -647,6 +711,7 @@ fn toggle(
         e.set_open(open, tab);
         if !open {
             crate::knobs::set_bypass(false);
+            crate::auto::set_marking(false);
         }
         set_cursor(&mut cursor, open);
     }
@@ -919,12 +984,14 @@ fn buttons(
                 let tab = e.tab;
                 e.set_open(false, tab);
                 crate::knobs::set_bypass(false);
+                crate::auto::set_marking(false);
                 fly.enter();
             }
             Btn::Close => {
                 let tab = e.tab;
                 e.set_open(false, tab);
                 crate::knobs::set_bypass(false);
+                crate::auto::set_marking(false);
                 set_cursor(&mut cursor, false);
             }
             Btn::Ab => {}
@@ -933,6 +1000,27 @@ fn buttons(
                 let tab = e.tab;
                 e.set_open(true, tab);
                 e.message = Some((if crate::flow::painting() { "Drag on the water (left button) to paint its flow; right button rubs it out".into() } else { "Flow painting off".into() }, t + 6.0));
+            }
+            Btn::MarkWater => {
+                crate::auto::set_marking(!crate::auto::marking());
+                let tab = e.tab;
+                e.set_open(true, tab);
+                e.message = Some((
+                    if crate::auto::marking() { "Click a surface in the scene to mark it as water (or unmark it). Water shows a cyan outline.".into() } else { "Marking water off (Save to keep the marks)".into() },
+                    t + 6.0,
+                ));
+            }
+            Btn::MarkKind(i) => {
+                crate::auto::set_mark_kind(MARK_KINDS[i].1);
+                let tab = e.tab;
+                e.set_open(true, tab);
+                e.message = Some((
+                    match MARK_KINDS[i].1 {
+                        None => "A click now marks or unmarks a surface as water".into(),
+                        Some(_) => format!("A click on water now makes it a {} (Save to keep it)", MARK_KINDS[i].0.to_lowercase()),
+                    },
+                    t + 5.0,
+                ));
             }
             Btn::ClearFlow => {
                 if let Some(p) = paint.as_mut() {
@@ -957,7 +1045,7 @@ fn refresh(
     weather: Res<crate::weather::Weather>,
     settings: Res<crate::AtmosSettings>,
     level: Res<crate::AtmosLevel>,
-    mut values: Query<(&ValueText, &mut Text, &mut TextColor), (Without<Note>, Without<Status>, Without<Help>)>,
+    mut values: Query<(&ValueText, &mut Text, &mut TextColor), (Without<Note>, Without<Status>, Without<Help>, Without<NoWater>)>,
     mut fills: Query<(&Fill, &mut Node), Without<ResetMark>>,
     mut marks: Query<(&ResetMark, &mut Node), Without<Fill>>,
     mut rows_bg: Query<(&RowBg, &mut BackgroundColor, &RelativeCursorPosition)>,
@@ -965,6 +1053,8 @@ fn refresh(
     mut note: Query<&mut Text, (With<Note>, Without<ValueText>, Without<Status>, Without<Help>)>,
     mut status: Query<&mut Text, (With<Status>, Without<ValueText>, Without<Note>, Without<Help>)>,
     mut help: Query<&mut Text, (With<Help>, Without<ValueText>, Without<Note>, Without<Status>)>,
+    mut no_water: Query<(&mut Text, &mut TextColor), (With<NoWater>, Without<Help>, Without<ValueText>, Without<Note>, Without<Status>)>,
+    mut ao_note: Query<&mut Text, (With<AoNote>, Without<NoWater>, Without<Help>, Without<ValueText>, Without<Note>, Without<Status>)>,
 ) {
     if !e.open {
         return;
@@ -1019,7 +1109,11 @@ fn refresh(
         Some(Line::Knob(i)) => {
             let def = &DEFS[i];
             let d = crate::knobs::default_of(def.key).unwrap_or(def.fallback);
-            let default = if def.auto != Auto::No { "the level's own".to_owned() } else { format(def, d, true) };
+            let default = match def.auto {
+                Auto::No => format(def, d, true),
+                Auto::Unset(word) => format!("{}, your game's own setup", word.to_lowercase()),
+                _ => "the level's own".to_owned(),
+            };
             format!("{}: {}  (Default: {default}. Knob: {}.)", def.label, def.help, def.key)
         }
         Some(Line::Advanced) => "More settings for this tab. Every one starts at its default.".into(),
@@ -1028,6 +1122,32 @@ fn refresh(
     for mut h in &mut help {
         if h.0 != want {
             h.0 = want.clone();
+        }
+    }
+    let want = crate::shadows::ao_note().unwrap_or("");
+    for mut t in &mut ao_note {
+        if t.0 != want {
+            t.0 = want.to_owned();
+        }
+    }
+    // The Water tab: what water was found, else how to give it some.
+    if !no_water.is_empty() {
+        let found = crate::auto::summary();
+        let kinds = crate::auto::kinds_summary();
+        let (want, colour) = if !found.is_empty() {
+            (if kinds.is_empty() { format!("Water found: {found}") } else { format!("Water found: {found}.  Kinds: {kinds}") }, INK_DIM)
+        } else if crate::modern_water::has_water() {
+            ("Water: tagged by the game".to_owned(), INK_DIM)
+        } else {
+            ("This level has no water marked for bevy_atmos. Use Mark water, name the mesh 'water', or see README: Water.".to_owned(), WARN)
+        };
+        for (mut t, mut c) in &mut no_water {
+            if t.0 != want {
+                t.0 = want.clone();
+            }
+            if c.0 != colour {
+                c.0 = colour;
+            }
         }
     }
     // Status: the level, its file and whether there are unsaved changes.

@@ -40,6 +40,7 @@
 use bevy::prelude::*;
 
 pub mod air;
+pub mod auto;
 mod cloud_noise;
 pub mod clouds;
 pub mod editor;
@@ -48,7 +49,10 @@ pub mod flycam;
 pub mod grade;
 pub mod knobs;
 pub mod modern_water;
+pub mod shadows;
+pub mod shelter;
 pub mod sky;
+pub mod testshots;
 pub mod ssr;
 pub mod time;
 pub mod water;
@@ -79,6 +83,9 @@ pub struct AtmosSettings {
     /// The editor's key (F9) and the fly camera's (F8).
     pub editor_key: KeyCode,
     pub flycam_key: KeyCode,
+    /// Words that make a mesh water by its name, glTF mesh or material
+    /// name (any case; `crate::auto`). Default [`auto::WATER_WORDS`].
+    pub water_words: Vec<String>,
 }
 
 /// Adds everything: knobs and saved looks, time of day, sky, air, weather,
@@ -90,11 +97,14 @@ pub struct AtmosPlugin {
     /// The editor's key (F9 unless set) and the fly camera's (F8).
     pub editor_key: KeyCode,
     pub flycam_key: KeyCode,
+    /// Words that make a mesh water by its name, glTF mesh or material
+    /// name (any case; `crate::auto`). Default [`auto::WATER_WORDS`].
+    pub water_words: Vec<String>,
 }
 
 impl AtmosPlugin {
     pub fn new(level: impl Into<String>, save_dir: impl Into<std::path::PathBuf>) -> Self {
-        AtmosPlugin { level: level.into(), save_dir: save_dir.into(), builtin: &[], editor_key: KeyCode::F9, flycam_key: KeyCode::F8 }
+        AtmosPlugin { level: level.into(), save_dir: save_dir.into(), builtin: &[], editor_key: KeyCode::F9, flycam_key: KeyCode::F8, water_words: auto::WATER_WORDS.iter().map(|w| w.to_string()).collect() }
     }
 
     /// Other keys for the editor and the fly camera (when the game uses F9/F8).
@@ -108,7 +118,14 @@ impl AtmosPlugin {
 impl Plugin for AtmosPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(AtmosLevel(self.level.clone()))
-            .insert_resource(AtmosSettings { save_dir: self.save_dir.clone(), builtin: self.builtin, editor_key: self.editor_key, flycam_key: self.flycam_key })
+            .insert_resource(AtmosSettings {
+                save_dir: self.save_dir.clone(),
+                builtin: self.builtin,
+                editor_key: self.editor_key,
+                flycam_key: self.flycam_key,
+                water_words: self.water_words.clone(),
+            })
+            .add_plugins((auto::AutoPlugin, testshots::TestShotsPlugin, shelter::ShelterPlugin))
             .add_plugins((
                 knobs::KnobsPlugin,
                 ssr::SsrPlugin,
@@ -122,6 +139,7 @@ impl Plugin for AtmosPlugin {
                 modern_water::ModernWaterPlugin,
                 flow::FlowPlugin,
                 grade::GradePlugin,
+                shadows::ShadowsPlugin,
                 flycam::FlycamPlugin,
                 editor::EditorPlugin,
             ));

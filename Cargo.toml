@@ -1,6 +1,6 @@
 [package]
 name = "bevy_atmos"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Sky, volumetric clouds, weather, wet surfaces and modern water for Bevy, with an in-game editor that saves a look per level."
 license = "MIT OR Apache-2.0"
@@ -15,6 +15,10 @@ exclude = ["docs/", "media/"]
 bevy = "0.19.1"
 # The fog-before-transparents schedule pass (a type in its signature; already Bevy's).
 indexmap = "2"
+
+[features]
+# Percentage-closer soft shadows for `shadows.softness` (Bevy's experimental PCSS).
+pcss = ["bevy/experimental_pbr_pcss"]
 
 [[example]]
 name = "demo"

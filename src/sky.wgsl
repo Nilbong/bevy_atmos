@@ -346,6 +346,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         // By night: a glow toward the horizon (the clock's horizon colour,
         // shared with the fog and the ocean), darker overhead.
         base = max(base, night_sky(d) * sky.night);
+        // Twilight (the sun just under or over the horizon): the glow the
+        // high air still catches, orange to the sun's side low down, a
+        // deep blue overhead, the rose band opposite; the scatter alone
+        // left the sky a muddy brown.
+        let tw = smoothstep(-0.2, -0.03, sun.y) * (1.0 - smoothstep(0.02, 0.14, sun.y)) * (1.0 - storm_of());
+        if (tw > 0.0) {
+            let flat_d = normalize(vec2(d.x, d.z) + vec2(1e-5, 0.0));
+            let flat_s = normalize(vec2(sun.x, sun.z) + vec2(1e-5, 0.0));
+            let toward = dot(flat_d, flat_s) * 0.5 + 0.5;
+            let up = max(d.y, 0.0);
+            let low = exp(-up / 0.09);
+            // (Fainter the deeper the sun is down.)
+            let depth = smoothstep(-0.2, 0.0, sun.y);
+            let band = vec3(1.0, 0.42, 0.14) * low * (0.25 + 0.75 * toward * toward) * depth;
+            let rose = vec3(0.55, 0.32, 0.45) * exp(-abs(up - 0.08) / 0.07) * (1.0 - toward) * 0.5 * depth;
+            let over = vec3(0.10, 0.16, 0.36) * (1.0 - low) * (0.4 + 0.6 * depth);
+            base = max(base, (band + rose + over) * DAY_ZENITH * 0.55 * tw);
+        }
     }
     if (sky.fog > 0.5) {
         base = mix(base, horizon, 0.8 * exp(-max(d.y, 0.0) / 0.05));

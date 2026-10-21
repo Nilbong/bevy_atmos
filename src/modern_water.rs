@@ -45,8 +45,10 @@ impl Plugin for ModernWaterPlugin {
             .init_resource::<crate::weather::Weather>()
             .init_resource::<crate::time::TimeOfDay>()
             .add_plugins(MaterialPlugin::<ModernWaterMaterial>::default())
-            .add_systems(Update, (replace, look, auto_shelter).chain().after(crate::LookSet))
-            .add_systems(PostUpdate, (follow, under).chain().after(bevy::transform::TransformSystems::Propagate));
+            .add_systems(Update, (replace, kinds, look, auto_shelter).chain().after(crate::LookSet))
+            .add_systems(PostUpdate, (follow, under).chain().after(bevy::transform::TransformSystems::Propagate))
+            .init_resource::<FlatMeshes>()
+            .add_systems(PostUpdate, (remember_flat.after(bevy::asset::AssetEventSystems), edge_meshes).chain());
     }
 }
 
@@ -71,6 +73,63 @@ pub struct WaterTint(pub Color);
 /// whose real depth below is a few centimetres.
 #[derive(Component, Clone, Copy)]
 pub struct WaterDepth(pub f32);
+
+/// What kind of water a surface is: how it moves. Set by the host (or the
+/// editor's Mark water tool), else worked out from its size, shape, slope
+/// and name (`crate::auto`).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaterKind {
+    /// Small: still and mirror-like, no waves, rain rings only.
+    Puddle,
+    /// A pond, lake or fountain: small waves, by its size.
+    Pond,
+    /// Long and narrow or sloped: flows along its length.
+    River,
+    /// Large: swells.
+    Sea,
+}
+
+impl WaterKind {
+    pub fn from_index(i: u32) -> Option<Self> {
+        Some(match i {
+            1 => WaterKind::Puddle,
+            2 => WaterKind::Pond,
+            3 => WaterKind::River,
+            4 => WaterKind::Sea,
+            _ => return None,
+        })
+    }
+
+    pub fn index(self) -> u32 {
+        match self {
+            WaterKind::Puddle => 1,
+            WaterKind::Pond => 2,
+            WaterKind::River => 3,
+            WaterKind::Sea => 4,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            WaterKind::Puddle => "puddle",
+            WaterKind::Pond => "pond",
+            WaterKind::River => "river",
+            WaterKind::Sea => "sea",
+        }
+    }
+}
+
+/// The kind a surface was found to be, and its waves for its size (x wave
+/// height scale, y wave length scale, z the kind's index): written by
+/// `crate::auto`, read into the water's material.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct DetectedKind(pub WaterKind, pub Vec4);
+
+/// The mesh's vertex colour alpha fades the water (its edges): for a host
+/// whose water meshes carry a fade there (not by default: in many games
+/// that alpha means something else, and faded water in squares).
+#[derive(Component, Clone, Copy, Default)]
+pub struct FadeEdges;
 
 /// Light on the water's body beyond Bevy's lights (linear, in the lights'
 /// units before exposure, like an ambient light's): a host lighting its
@@ -152,6 +211,11 @@ pub struct ModernWater {
     /// host's light on the body ([`WaterAmbient`]; set each frame).
     #[uniform(122)]
     pub extra: Vec4,
+    /// x: wave height scale, y: wave length scale (the body's size), z: the
+    /// kind ([`WaterKind::index`], 0 unknown), w: 1 to fade by the vertex
+    /// alpha ([`FadeEdges`]).
+    #[uniform(123)]
+    pub kind: Vec4,
 }
 
 impl MaterialExtension for ModernWater {
@@ -174,11 +238,26 @@ pub struct ModernCopy {
     river: bool,
 }
 
+impl ModernCopy {
+    /// The host's water entity this draws.
+    pub fn original(&self) -> Entity {
+        self.original
+    }
+}
+
 #[derive(Resource)]
 struct Shared(Handle<ModernWaterMaterial>);
 
+/// The level has water marked [`AtmosWater`] (the editor's Water tab says
+/// so when it hasn't).
+pub fn has_water() -> bool {
+    HAS_WATER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+static HAS_WATER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn on() -> bool {
-    crate::knobs::get("water.replace", 0.0) >= 0.5
+    crate::knobs::get("water.replace", 1.0) >= 0.5
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -193,7 +272,11 @@ fn replace(
     >,
     modern: Query<(Entity, &ModernCopy)>,
     cameras: Query<(Entity, Has<DepthPrepass>), With<crate::AtmosCamera>>,
+    fades: Query<(), With<FadeEdges>>,
+    host_materials: (Query<&MeshMaterial3d<StandardMaterial>>, Res<Assets<StandardMaterial>>),
+    edges: Query<(Option<&EdgeMesh>, Has<EdgeChecked>)>,
 ) {
+    HAS_WATER.store(!originals.is_empty() || !modern.is_empty(), std::sync::atomic::Ordering::Relaxed);
     let on = on();
     if !on {
         for (e, m) in &modern {
@@ -223,13 +306,25 @@ fn replace(
         if done.contains(&e) {
             continue;
         }
+        // (Its own mesh: once its soft-edged copy is made, or found not to
+        // be possible, `edge_meshes`.)
+        let (edge_mesh, checked) = edges.get(e).map_or((None, true), |(m, c)| (m.map(|m| m.0.clone()), c));
+        if own && !checked {
+            continue;
+        }
+        let soft = edge_mesh.is_some();
         let was = *vis;
         *vis = Visibility::Hidden;
         // A river or `OwnMesh` water: its own mesh, and its own material
         // (its flow, or mode 5: still water on its mesh; its colour).
         let on_mesh = flow.is_some() || own;
-        let material = if on_mesh || tint.is_some() || least.is_some() {
+        // (Each its own material: its kind and size set its waves.)
+        let material = {
             let mut m = materials.get(&handle).cloned().unwrap_or_else(|| ExtendedMaterial { base: StandardMaterial::default(), extension: ModernWater::default() });
+            // (The original's depth bias, and a little more: water laid
+            // over the ground as a sheet would sink into it without.)
+            let bias = host_materials.0.get(e).ok().and_then(|h| host_materials.1.get(&h.0)).map_or(0.0, |o| o.depth_bias);
+            m.base.depth_bias = bias + 2.0;
             if let Some(flow) = flow {
                 m.extension.flow = flow.uniform();
                 m.extension.flow_map = flow.map_image();
@@ -242,11 +337,10 @@ fn replace(
             if let Some(d) = least {
                 m.extension.extra.x = d.0.max(0.0);
             }
+            m.extension.kind = Vec4::new(1.0, 1.0, 0.0, (fades.contains(e) || soft) as u32 as f32);
             materials.add(m)
-        } else {
-            handle.clone()
         };
-        let mesh = if on_mesh { mesh.0.clone() } else { meshes.add(grid(aabb)) };
+        let mesh = if on_mesh { edge_mesh.unwrap_or_else(|| mesh.0.clone()) } else { meshes.add(grid(aabb)) };
         commands.spawn((
             Name::new("atmos modern water"),
             ModernCopy { original: e, was, river: on_mesh },
@@ -261,7 +355,7 @@ fn replace(
     if any {
         for (c, has) in &cameras {
             if !has {
-                commands.entity(c).insert(DepthPrepass);
+                commands.entity(c).try_insert(DepthPrepass);
             }
         }
     }
@@ -304,6 +398,36 @@ fn grid(aabb: &Aabb) -> Mesh {
     mesh
 }
 
+/// Each copy's material takes its original's kind (and a river's flow, if
+/// it came later).
+fn kinds(
+    copies: Query<(&ModernCopy, &MeshMaterial3d<ModernWaterMaterial>)>,
+    originals: Query<(Option<&DetectedKind>, Option<&crate::flow::WaterFlow>, Has<FadeEdges>, Option<&WaterDepth>, Has<EdgeMesh>)>,
+    mut materials: ResMut<Assets<ModernWaterMaterial>>,
+) {
+    for (copy, handle) in &copies {
+        let Ok((kind, flow, fade, least, soft)) = originals.get(copy.original) else { continue };
+        // (Its least coloured depth, if it changed since: the kind's.)
+        if let Some(d) = least {
+            if materials.get(&handle.0).is_some_and(|m| m.extension.extra.x != d.0.max(0.0)) {
+                if let Some(mut m) = materials.get_mut(&handle.0) {
+                    m.extension.extra.x = d.0.max(0.0);
+                }
+            }
+        }
+        let want = kind.map_or(Vec4::new(1.0, 1.0, 0.0, 0.0), |k| k.1).truncate().extend((fade || soft) as u32 as f32);
+        let want_flow = flow.map_or(Vec4::ZERO, |f| f.uniform());
+        let Some(m) = materials.get(&handle.0) else { continue };
+        let flow_now = if m.extension.flow.x == 5.0 && want_flow == Vec4::ZERO { m.extension.flow } else { want_flow };
+        if m.extension.kind != want || m.extension.flow != flow_now {
+            if let Some(mut m) = materials.get_mut(&handle.0) {
+                m.extension.kind = want;
+                m.extension.flow = flow_now;
+            }
+        }
+    }
+}
+
 /// The copies stay where their originals are.
 fn follow(originals: Query<&GlobalTransform, With<AtmosWater>>, mut modern: Query<(&ModernCopy, &mut Transform), Without<AtmosWater>>) {
     for (m, mut t) in &mut modern {
@@ -323,6 +447,13 @@ pub struct AutoShelter {
     key: Vec<[i32; 5]>,
 }
 
+/// The modern water's surfaces as shelter heights (the same layout as the
+/// shelter map), for the scene's shelter (`crate::shelter`) to merge in.
+#[derive(Resource)]
+pub struct WaterShelter {
+    pub image: Handle<Image>,
+}
+
 const SHELTER_CELL: f32 = 0.5;
 const SHELTER_CELLS: u32 = 512;
 
@@ -330,12 +461,19 @@ fn auto_shelter(
     mut commands: Commands,
     shelter: Option<Res<crate::weather::Shelter>>,
     auto: Option<Res<AutoShelter>>,
+    water: Option<Res<WaterShelter>>,
     mut images: ResMut<Assets<Image>>,
     modern: Query<(&GlobalTransform, &Aabb, &ModernCopy)>,
 ) {
-    // (A host's own shelter wins.)
-    if shelter.is_some() && auto.is_none() {
+    // (A host's own shelter wins; the scene's (`crate::shelter`, while
+    // `rain.shelter` is on) takes the water's in.)
+    let mine = |s: &crate::weather::Shelter| water.as_ref().is_some_and(|w| w.image == s.heights);
+    let scene = crate::knobs::get("rain.shelter", 1.0) >= 0.5;
+    if shelter.as_ref().is_some_and(|s| !mine(s)) && auto.is_none() {
         return;
+    }
+    if scene && auto.is_some() && shelter.as_ref().is_some_and(|s| mine(s)) {
+        commands.remove_resource::<crate::weather::Shelter>();
     }
     // The water's boxes: world cells, and the surface's height (cm).
     let mut boxes: Vec<[i32; 5]> = modern
@@ -356,7 +494,10 @@ fn auto_shelter(
     if boxes.is_empty() {
         if auto.is_some() {
             commands.remove_resource::<AutoShelter>();
-            commands.remove_resource::<crate::weather::Shelter>();
+            commands.remove_resource::<WaterShelter>();
+            if shelter.as_ref().is_some_and(|s| mine(s)) {
+                commands.remove_resource::<crate::weather::Shelter>();
+            }
         }
         return;
     }
@@ -378,7 +519,11 @@ fn auto_shelter(
         bevy::render::render_resource::TextureFormat::R32Float,
         bevy::asset::RenderAssetUsages::RENDER_WORLD,
     );
-    commands.insert_resource(crate::weather::Shelter { heights: images.add(image), cell: SHELTER_CELL, cells: SHELTER_CELLS });
+    let image = images.add(image);
+    if !scene && shelter.as_ref().is_none_or(|s| mine(s)) {
+        commands.insert_resource(crate::weather::Shelter { heights: image.clone(), cell: SHELTER_CELL, cells: SHELTER_CELLS });
+    }
+    commands.insert_resource(WaterShelter { image });
     commands.insert_resource(AutoShelter { key: boxes });
 }
 
@@ -427,7 +572,7 @@ fn look(
     w.waves = Vec4::new(k("water.wave_height", 0.3).clamp(0.0, 3.0), k("water.wave_speed", 1.0).clamp(0.0, 4.0), k("water.choppiness", 0.4).clamp(0.0, 1.0), k("water.detail", 1.0).clamp(0.1, 4.0));
     w.wind = Vec4::new(dir.cos(), dir.sin(), weather.rain * k("water.ripples", 1.0).clamp(0.0, 3.0), underwater.under as u32 as f32);
     w.light = Vec4::new(k("water.reflection", 1.0).clamp(0.0, 3.0), k("water.glitter", 1.0).clamp(0.0, 4.0), k("water.fresnel", 1.0).clamp(0.1, 3.0), cameras.iter().next().map_or(1000.0, |s| s.brightness));
-    w.body = Vec4::new(k("water.foam", 1.0).clamp(0.0, 3.0), k("water.foam_width", 0.4).clamp(0.01, 4.0), 0.0, 0.0);
+    w.body = Vec4::new(k("water.foam", 1.0).clamp(0.0, 3.0), k("water.foam_width", 0.4).clamp(0.01, 4.0), k("water.sediment", 0.6).clamp(0.0, 1.0), 0.0);
     w.foam = Vec4::new(k("water.crest_foam", 0.6).clamp(0.0, 3.0), k("water.foam_threshold", 0.5).clamp(0.0, 1.5), 0.0, 0.0);
     w.scatter = if w.tint.w > 0.5 { (w.tint.truncate() * k("water.brightness", 1.0).clamp(0.0, 4.0)).extend(1.0) } else { scatter.extend(1.0) };
     // (A host's own colour: murky water of that colour, absorbing evenly.)
@@ -505,17 +650,223 @@ fn under(
         match fog {
             Some(mut f) => *f = new,
             None => {
-                commands.entity(cam).insert(new);
+                commands.entity(cam).try_insert(new);
             }
         }
     } else if let Some(was) = saved.take() {
         match was {
             Some(f) => {
-                commands.entity(cam).insert(f);
+                commands.entity(cam).try_insert(f);
             }
             None => {
-                commands.entity(cam).remove::<DistanceFog>();
+                commands.entity(cam).try_remove::<DistanceFog>();
             }
         }
     }
+}
+
+/// A soft-edged copy of a water surface's own mesh (`edge_meshes`): its
+/// vertex alpha the distance in from the mesh's boundary.
+#[derive(Component, Clone)]
+pub struct EdgeMesh(pub Handle<Mesh>);
+
+/// `edge_meshes` has looked at this surface.
+#[derive(Component)]
+pub struct EdgeChecked;
+
+/// Water on its own mesh, as it arrives: while its data is still on the CPU
+/// (a host's render-only mesh keeps it only for the frame it's added), a
+/// copy subdivided so it has inner vertices, its vertex alpha fading in
+/// from the boundary, so puddles and ponds get soft edges with no host
+/// data. (Not where the host fades its own, `FadeEdges`.)
+#[allow(clippy::type_complexity)]
+fn edge_meshes(
+    mut commands: Commands,
+    waters: Query<(Entity, &Mesh3d, Has<FadeEdges>), (With<AtmosWater>, With<OwnMesh>, Without<EdgeChecked>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    flat: Res<FlatMeshes>,
+) {
+    for (e, handle, host_fades) in &waters {
+        if host_fades {
+            commands.entity(e).try_insert(EdgeChecked);
+            continue;
+        }
+        // (A host's render-only mesh has given up its data by now: the
+        // copy `remember_flat` kept as it arrived.)
+        let soft = match meshes.get(&handle.0) {
+            Some(mesh) => soft_edged(mesh).or_else(|| flat.0.get(&handle.0.id()).and_then(|(m, _)| soft_edged(m))),
+            None => continue,
+        };
+        let mut entity = commands.entity(e);
+        entity.try_insert(EdgeChecked);
+        match soft {
+            Some(m) => {
+                entity.try_insert(EdgeMesh(meshes.add(m)));
+                EDGES.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            None => {
+                EDGES.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        let (a, b) = (EDGES.0.load(std::sync::atomic::Ordering::Relaxed), EDGES.1.load(std::sync::atomic::Ordering::Relaxed));
+        debug!("bevy_atmos: soft water edges on {a} surfaces ({b} without: data not on the CPU or too big)");
+    }
+}
+
+/// `mesh` subdivided to some hundreds of triangles, its vertex alpha the
+/// distance in from its boundary (smoothstep over a fade width set by its
+/// size); none if its data isn't on the CPU or it has no boundary.
+fn soft_edged(mesh: &Mesh) -> Option<Mesh> {
+    use bevy::mesh::VertexAttributeValues as V;
+    let pos: Vec<Vec3> = match mesh.try_attribute_option(Mesh::ATTRIBUTE_POSITION).ok()?? {
+        V::Float32x3(p) => p.iter().map(|p| Vec3::from(*p)).collect(),
+        _ => return None,
+    };
+    let nor: Option<Vec<Vec3>> = match mesh.try_attribute_option(Mesh::ATTRIBUTE_NORMAL).ok().flatten() {
+        Some(V::Float32x3(n)) => Some(n.iter().map(|n| Vec3::from(*n)).collect()),
+        _ => None,
+    };
+    let uv: Option<Vec<Vec2>> = match mesh.try_attribute_option(Mesh::ATTRIBUTE_UV_0).ok().flatten() {
+        Some(V::Float32x2(u)) => Some(u.iter().map(|u| Vec2::from(*u)).collect()),
+        _ => None,
+    };
+    let mut tris: Vec<[u32; 3]> = match mesh.try_indices_option().ok()? {
+        Some(i) => i.iter().collect::<Vec<usize>>().chunks_exact(3).map(|c| [c[0] as u32, c[1] as u32, c[2] as u32]).collect(),
+        None => (0..pos.len() as u32 / 3).map(|t| [t * 3, t * 3 + 1, t * 3 + 2]).collect(),
+    };
+    if tris.is_empty() || tris.len() > 4_000 {
+        return None;
+    }
+    let (mut p, mut n, mut u) = (pos, nor, uv);
+    // Subdivide (each triangle into four) until there are inner vertices
+    // enough to fade across.
+    while tris.len() < 600 {
+        let mut mid: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+        let mut next = Vec::with_capacity(tris.len() * 4);
+        for [a, b, c] in tris {
+            let mut midpoint = |a: u32, b: u32| -> u32 {
+                *mid.entry((a.min(b), a.max(b))).or_insert_with(|| {
+                    p.push((p[a as usize] + p[b as usize]) * 0.5);
+                    if let Some(n) = n.as_mut() {
+                        let m = (n[a as usize] + n[b as usize]).normalize_or(Vec3::Y);
+                        n.push(m);
+                    }
+                    if let Some(u) = u.as_mut() {
+                        let m = (u[a as usize] + u[b as usize]) * 0.5;
+                        u.push(m);
+                    }
+                    p.len() as u32 - 1
+                })
+            };
+            let ab = midpoint(a, b);
+            let bc = midpoint(b, c);
+            let ca = midpoint(c, a);
+            next.extend([[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]);
+        }
+        tris = next;
+    }
+    // The distance in from the edge, from the mesh drawn flat into 10 cm
+    // cells (on its two widest axes), kept sparse: a host's puddles are
+    // often loose triangles or T-junctions (where each triangle's own edges
+    // read as the boundary), and one mesh may hold puddles scattered over a
+    // whole street (a coarse grid missed the small ones and faded them out).
+    let (lo, hi) = p.iter().fold((Vec3::MAX, Vec3::MIN), |(l, h), v| (l.min(*v), h.max(*v)));
+    let size = hi - lo;
+    let thin = if size.x <= size.y && size.x <= size.z { 0 } else if size.y <= size.z { 1 } else { 2 };
+    let (ia, ib) = match thin {
+        0 => (1, 2),
+        1 => (0, 2),
+        _ => (0, 1),
+    };
+    const CELL: f32 = 0.1;
+    let flat = |v: Vec3| Vec2::new(v[ia], v[ib]) / CELL;
+    let mut inside: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    for t in &tris {
+        let (a, b, c) = (flat(p[t[0] as usize]), flat(p[t[1] as usize]), flat(p[t[2] as usize]));
+        let (mn, mx) = (a.min(b).min(c), a.max(b).max(c));
+        let area = (b - a).perp_dot(c - a);
+        // (Its corners' cells always: a sliver still marks its cells.)
+        for q in [a, b, c, (a + b + c) / 3.0] {
+            inside.insert((q.x.floor() as i32, q.y.floor() as i32));
+        }
+        if area.abs() < 1e-8 {
+            continue;
+        }
+        for y in mn.y.floor() as i32..=mx.y.ceil() as i32 {
+            for x in mn.x.floor() as i32..=mx.x.ceil() as i32 {
+                let q = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+                let w0 = (b - q).perp_dot(c - q) / area;
+                let w1 = (c - q).perp_dot(a - q) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 > -0.05 && w1 > -0.05 && w2 > -0.05 {
+                    inside.insert((x, y));
+                }
+            }
+        }
+        if inside.len() > 3_000_000 {
+            return None;
+        }
+    }
+    // (Fade over up to 60 cm: a vertex's distance to the nearest cell
+    // outside the water, searched out that far.)
+    const REACH: i32 = 6;
+    let reach_m = REACH as f32 * CELL;
+    let alpha: Vec<[f32; 4]> = p
+        .iter()
+        .map(|v| {
+            let f = flat(*v);
+            let (cx, cy) = (f.x.floor() as i32, f.y.floor() as i32);
+            let mut best = reach_m;
+            for dy in -REACH..=REACH {
+                for dx in -REACH..=REACH {
+                    if !inside.contains(&(cx + dx, cy + dy)) {
+                        let d = Vec2::new(dx as f32, dy as f32).length() * CELL;
+                        best = best.min((d - CELL * 0.5).max(0.0));
+                    }
+                }
+            }
+            let x = (best / reach_m).clamp(0.0, 1.0);
+            [1.0, 1.0, 1.0, x * x * (3.0 - 2.0 * x)]
+        })
+        .collect();
+    let mut out = Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD);
+    out.insert_attribute(Mesh::ATTRIBUTE_POSITION, p.iter().map(|v| v.to_array()).collect::<Vec<_>>());
+    out.insert_attribute(Mesh::ATTRIBUTE_NORMAL, n.map_or_else(|| vec![[0.0, 1.0, 0.0]; p.len()], |n| n.iter().map(|v| v.to_array()).collect()));
+    if let Some(u) = u {
+        out.insert_attribute(Mesh::ATTRIBUTE_UV_0, u.iter().map(|v| v.to_array()).collect::<Vec<_>>());
+    }
+    out.insert_attribute(Mesh::ATTRIBUTE_COLOR, alpha);
+    out.insert_indices(bevy::mesh::Indices::U32(tris.into_iter().flatten().collect()));
+    Some(out)
+}
+
+/// Soft-edged water surfaces made, and those that couldn't be.
+static EDGES: (std::sync::atomic::AtomicU32, std::sync::atomic::AtomicU32) = (std::sync::atomic::AtomicU32::new(0), std::sync::atomic::AtomicU32::new(0));
+
+/// Small flat meshes as they arrive (the CPU copy a host's render-only mesh
+/// gives up when it goes to the GPU), kept a few seconds for water surfaces
+/// tagged after: their soft edges (`edge_meshes`).
+#[derive(Resource, Default)]
+struct FlatMeshes(std::collections::HashMap<AssetId<Mesh>, (Mesh, u32)>, u32);
+
+fn remember_flat(mut events: MessageReader<AssetEvent<Mesh>>, meshes: Res<Assets<Mesh>>, mut flat: ResMut<FlatMeshes>) {
+    flat.1 = flat.1.wrapping_add(1);
+    let now = flat.1;
+    for ev in events.read() {
+        let AssetEvent::Added { id } = ev else { continue };
+        let Some(mesh) = meshes.get(*id) else { continue };
+        let Some(Some(bevy::mesh::VertexAttributeValues::Float32x3(p))) = mesh.try_attribute_option(Mesh::ATTRIBUTE_POSITION).ok() else { continue };
+        if p.len() < 3 || p.len() > 6_000 {
+            continue;
+        }
+        let (lo, hi) = p.iter().fold((Vec3::MAX, Vec3::MIN), |(l, h), v| (l.min(Vec3::from(*v)), h.max(Vec3::from(*v))));
+        let size = hi - lo;
+        // (Sheets only: one axis much thinner than the others.)
+        if size.min_element() > size.max_element() * 0.05 {
+            continue;
+        }
+        flat.0.insert(*id, (mesh.clone(), now));
+    }
+    // (Kept ten seconds or so.)
+    flat.0.retain(|_, (_, at)| now.wrapping_sub(*at) < 600);
 }

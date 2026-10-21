@@ -8,15 +8,18 @@
 //! and by the sky round them. Each frame's march is jittered and blended
 //! with the last frame's, reprojected, so few steps still converge sharp.
 //!
-//! A compute pass (`clouds.wgsl`) writes the clouds (radiance and
-//! transmittance) before the camera draws; a fullscreen quad at the far
-//! plane (`cloud_layer.wgsl`) lays them over the sky's pixels only. The
-//! sky's cube then has no clouds of its own (`crate::sky`), and a small
-//! cube with them stays for reflections.
+//! These are the only clouds. A compute pass (`clouds.wgsl`) writes them
+//! (radiance and transmittance) before the camera draws; a fullscreen quad
+//! at the far plane (`cloud_layer.wgsl`) lays them over the sky's pixels.
+//! The same pass draws the reflections' and ambient cube from the same
+//! clouds (`cube_main`: same model, knobs and lighting, 256 a face, a face a
+//! frame) over the sky behind them; the sky's own cube (`crate::sky`) has no
+//! clouds.
 //!
-//! Knobs: `sky.screen_clouds` (1; 0 the cube's own clouds), `clouds.density`
-//! (1), `clouds.erosion` (1, detail eating the edges), `clouds.resolution`
-//! (of the view: half, at most ~960 pixels across), plus the sky's `sky.cover`, `sky.darkness`,
+//! Knobs: `clouds.quality` (0 off: no clouds; 1 low, 2 medium, 3 high: the
+//! march's steps and resolution), `clouds.density` (1), `clouds.erosion`
+//! (1, detail eating the edges), `clouds.resolution` (of the view; unset:
+//! the quality's), plus the sky's `sky.cover`, `sky.darkness`,
 //! `sky.altitude`, wind and time of day.
 
 use bevy::asset::RenderAssetUsages;
@@ -27,7 +30,7 @@ use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::render_asset::RenderAssets;
-use bevy::render::render_resource::binding_types::{sampler, texture_2d, texture_3d, texture_cube, texture_storage_2d, uniform_buffer};
+use bevy::render::render_resource::binding_types::{sampler, texture_2d, texture_3d, texture_cube, texture_storage_2d, texture_storage_2d_array, uniform_buffer};
 use bevy::render::render_resource::*;
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderGraph, RenderQueue};
 use bevy::render::texture::GpuImage;
@@ -105,6 +108,34 @@ pub struct HostSky {
     pub grade: Vec3,
 }
 
+/// The clouds' quality (`clouds.quality`): 0 off (no clouds at all), 1 low,
+/// 2 medium, 3 high: the march's steps and the resolution they're drawn at.
+pub fn quality() -> u32 {
+    crate::knobs::get("clouds.quality", 2.0).round().clamp(0.0, 3.0) as u32
+}
+
+/// Steps through the layer, and the share of the view's resolution (and
+/// the most pixels across) the clouds are drawn at, for a quality.
+fn quality_settings(q: u32) -> (f32, f32, f32) {
+    match q {
+        1 => (40.0, 0.3, 640.0),
+        3 => (112.0, 0.75, 1440.0),
+        _ => (96.0, 0.5, 960.0),
+    }
+}
+
+/// A quality's look: how much fine detail, how sharp the edges.
+fn quality_shape(q: u32) -> (f32, f32) {
+    match q {
+        1 => (0.0, 1.1),
+        3 => (1.0, 4.5),
+        _ => (0.85, 2.8),
+    }
+}
+
+/// The reflections' cube's face size (`crate::sky`'s, drawn here).
+pub const ENV_SIZE: u32 = 256;
+
 #[derive(Resource)]
 struct NoiseJob(Mutex<Option<Receiver<crate::cloud_noise::CloudNoise>>>);
 
@@ -153,6 +184,14 @@ struct CloudParams {
     grade: Vec4,
     /// xyz: toward a lightning bolt; w: its flash now.
     flash: Vec4,
+    /// x detail, y edge sharpness, z wispiness, w self-shadowing.
+    shape: Vec4,
+    /// x: the sky's light on them, y: debug view (1 key only, 2 ambient),
+    /// z: seconds (the shapes' slow change).
+    tune: Vec4,
+    /// x: high cirrus amount, y: mid altocumulus amount (`clouds.cirrus`,
+    /// `clouds.alto`), z: how fast the shapes change (`clouds.evolve`).
+    layers: Vec4,
 }
 
 #[derive(Resource, Clone, ExtractResource)]
@@ -162,6 +201,9 @@ struct ScreenClouds {
     noise: NoiseImages,
     background: Handle<Image>,
     params: CloudParams,
+    /// The reflections' cube to draw a face of this frame (the plugin's own
+    /// sky), and its parameters.
+    env: Option<(Handle<Image>, CloudParams)>,
 }
 
 /// The composite: the clouds over the sky's pixels.
@@ -233,16 +275,18 @@ fn update(
     mut prev: Local<Option<Mat4>>,
     mut frame: Local<u32>,
     mut last_size: Local<UVec2>,
+    time: Res<Time>,
 ) {
     let k = crate::knobs::get;
     let camera = cameras.iter().next();
     // The sky's inputs: a host's own (`HostSky`), else the plugin's sky.
     let inputs = match (&host, &sky) {
         (Some(h), _) => h.enabled.then(|| inputs_of_host(h)),
-        (None, Some(s)) => (s.on() && crate::sky::screen_clouds()).then(|| inputs_of_sky(s)),
+        (None, Some(s)) => (s.on() && quality() > 0).then(|| inputs_of_sky(s)),
         _ => None,
     };
     let on = inputs.is_some() && noise.is_some() && camera.is_some();
+    let plugin_env = sky.as_ref().map(|s| s.env());
     let Some(((camera, at, skybox), (sky, noise))) = camera.zip(inputs.zip(noise)).filter(|_| on) else {
         for (_, mut vis, _) in &mut quads {
             vis.set_if_neq(Visibility::Hidden);
@@ -256,7 +300,8 @@ fn update(
     let view = camera.physical_viewport_size().unwrap_or(UVec2::new(1280, 720)).max(UVec2::ONE);
     // (Half the view's resolution, at most ~960 pixels across: the cost
     // follows the pixel count.)
-    let scale = k("clouds.resolution", (960.0 / view.x as f32).min(0.5)).clamp(0.125, 1.0);
+    let (steps, share, most) = quality_settings(quality().max(1));
+    let scale = k("clouds.resolution", (most / view.x as f32).min(share)).clamp(0.125, 1.0);
     let size = (view.as_vec2() * scale).ceil().as_uvec2().max(UVec2::ONE);
     let (output, history) = match &clouds {
         Some(c) => (c.output.clone(), c.history.clone()),
@@ -283,15 +328,27 @@ fn update(
         key_dir: p.key_dir.extend(p.night),
         key_color: p.key_color.extend(p.darkness),
         wind: Vec4::new(p.drift.x, p.drift.y, p.cover, p.tops),
-        look: Vec4::new(k("clouds.density", 1.0).clamp(0.0, 4.0), k("clouds.erosion", 1.0).clamp(0.0, 2.0), p.fog as u32 as f32, 0.0),
+        look: Vec4::new(k("clouds.density", 1.0).clamp(0.0, 4.0), k("clouds.erosion", 1.0).clamp(0.0, 2.0), p.fog as u32 as f32, steps),
         horizon: p.horizon.extend(p.storm),
         size: Vec4::new(size.x as f32, size.y as f32, if prev.is_some() && !resized { 1.0 } else { 0.0 }, 0.0),
-        grade: p.grade.extend(1.0),
+        tune: Vec4::new(k("clouds.ambient", 0.45).clamp(0.0, 4.0), k("clouds.debug", 0.0), time.elapsed_secs_wrapped(), 0.0),
+        layers: Vec4::new(k("clouds.cirrus", 0.5).clamp(0.0, 1.0), k("clouds.alto", 0.35).clamp(0.0, 1.0), k("clouds.evolve", 1.0).clamp(0.0, 10.0), 0.0),
+        grade: p.grade.extend(k("clouds.light", 2.8).clamp(0.0, 4.0)),
         flash: p.bolt_dir.normalize_or(Vec3::Y).extend(p.flash),
+        shape: {
+            let (detail, sharp) = quality_shape(quality().max(1));
+            Vec4::new(detail, sharp, k("clouds.erosion", 1.0).clamp(0.0, 2.0), k("clouds.shadow", 2.0).clamp(0.0, 8.0))
+        },
     };
     *prev = Some(clip_from_world);
     *frame = frame.wrapping_add(1);
-    commands.insert_resource(ScreenClouds { output: output.clone(), history, noise: noise.clone(), background: sky.background.clone(), params });
+    // The plugin's own sky: its reflections' cube from these same clouds, a
+    // face a frame, at fewer steps.
+    let env = plugin_env.filter(|_| host.is_none()).map(|e| {
+        let face = (*frame % 6) as f32;
+        (e, CloudParams { size: Vec4::new(ENV_SIZE as f32, ENV_SIZE as f32, 0.0, face), look: Vec4::new(params.look.x, params.look.y, params.look.z, (steps * 0.5).max(32.0)), ..params })
+    });
+    commands.insert_resource(ScreenClouds { output: output.clone(), history, noise: noise.clone(), background: sky.background.clone(), params, env });
     // The composite: a quad far off ahead (it sorts behind the water and
     // the rain), drawn at the far plane by its shader.
     let ahead = at.translation() + at.forward().as_vec3() * 50_000.0;
@@ -301,7 +358,9 @@ fn update(
             t.translation = ahead;
             vis.set_if_neq(Visibility::Inherited);
             if let Some(m) = materials.get(&handle.0) {
-                if m.clouds != output || m.look.x != brightness {
+                // (Resized textures: the material's bind group must be made
+                // anew, or it keeps showing the old one, frozen.)
+                if m.clouds != output || m.look.x != brightness || resized {
                     if let Some(mut m) = materials.get_mut(&handle.0) {
                         m.clouds = output;
                         m.look.x = brightness;
@@ -356,6 +415,8 @@ fn inputs_of_sky(s: &crate::sky::DynamicSky) -> HostSky {
 struct CloudPipeline {
     layout: BindGroupLayoutDescriptor,
     pipeline: CachedComputePipelineId,
+    cube_layout: BindGroupLayoutDescriptor,
+    cube_pipeline: CachedComputePipelineId,
     repeat: Sampler,
     clamp: Sampler,
 }
@@ -366,6 +427,7 @@ struct CloudBindGroup {
     size: UVec2,
     output: Handle<Image>,
     history: Handle<Image>,
+    cube: Option<BindGroup>,
 }
 
 fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>, pipeline_cache: Res<PipelineCache>, device: Res<RenderDevice>) {
@@ -390,6 +452,32 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>, pipelin
         label: Some("atmos_clouds".into()),
         layout: vec![layout.clone()],
         shader: asset_server.load("embedded://bevy_atmos/clouds.wgsl"),
+        entry_point: Some("main".into()),
+        ..default()
+    });
+    // The reflections' cube: the same shader's `cube_main`, the bindings it
+    // uses.
+    let cube_layout = BindGroupLayoutDescriptor::new(
+        "atmos_clouds_cube",
+        &BindGroupLayoutEntries::with_indices(
+            ShaderStages::COMPUTE,
+            (
+                (0, uniform_buffer::<CloudParams>(false)),
+                (1, texture_3d(TextureSampleType::Float { filterable: true })),
+                (2, texture_3d(TextureSampleType::Float { filterable: true })),
+                (3, texture_2d(TextureSampleType::Float { filterable: true })),
+                (4, sampler(SamplerBindingType::Filtering)),
+                (6, sampler(SamplerBindingType::Filtering)),
+                (8, texture_cube(TextureSampleType::Float { filterable: true })),
+                (9, texture_storage_2d_array(TextureFormat::Rgba16Float, StorageTextureAccess::WriteOnly)),
+            ),
+        ),
+    );
+    let cube_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("atmos_clouds_cube".into()),
+        layout: vec![cube_layout.clone()],
+        shader: asset_server.load("embedded://bevy_atmos/clouds.wgsl"),
+        entry_point: Some("cube_main".into()),
         ..default()
     });
     let repeat = device.create_sampler(&SamplerDescriptor {
@@ -402,7 +490,7 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>, pipelin
         ..default()
     });
     let clamp = device.create_sampler(&SamplerDescriptor { label: Some("atmos_clouds_clamp"), mag_filter: FilterMode::Linear, min_filter: FilterMode::Linear, ..default() });
-    commands.insert_resource(CloudPipeline { layout, pipeline, repeat, clamp });
+    commands.insert_resource(CloudPipeline { layout, pipeline, cube_layout, cube_pipeline, repeat, clamp });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -445,7 +533,27 @@ fn prepare(
             &background.texture_view,
         )),
     );
-    commands.insert_resource(CloudBindGroup { group, size, output: c.output.clone(), history: c.history.clone() });
+    let cube = c.env.as_ref().and_then(|(image, params)| {
+        let env = images.get(image)?;
+        let view = env.texture.create_view(&TextureViewDescriptor { dimension: Some(TextureViewDimension::D2Array), ..default() });
+        let mut uniform = UniformBuffer::from(*params);
+        uniform.write_buffer(&device, &queue);
+        Some(device.create_bind_group(
+            "atmos_clouds_cube",
+            &pipeline_cache.get_bind_group_layout(&pipeline.cube_layout),
+            &BindGroupEntries::with_indices((
+                (0, &uniform),
+                (1, &base.texture_view),
+                (2, &detail.texture_view),
+                (3, &curl.texture_view),
+                (4, &pipeline.repeat),
+                (6, &pipeline.clamp),
+                (8, &background.texture_view),
+                (9, &view),
+            )),
+        ))
+    });
+    commands.insert_resource(CloudBindGroup { group, size, output: c.output.clone(), history: c.history.clone(), cube });
 }
 
 fn draw(mut ctx: RenderContext, group: Option<Res<CloudBindGroup>>, pipeline: Res<CloudPipeline>, pipeline_cache: Res<PipelineCache>, images: Res<RenderAssets<GpuImage>>) {
@@ -461,6 +569,12 @@ fn draw(mut ctx: RenderContext, group: Option<Res<CloudBindGroup>>, pipeline: Re
         pass.set_pipeline(compute);
         pass.set_bind_group(0, &group.group, &[]);
         pass.dispatch_workgroups(group.size.x.div_ceil(8), group.size.y.div_ceil(8), 1);
+        // A face of the reflections' cube.
+        if let (Some(cube), Some(cube_pipeline)) = (&group.cube, pipeline_cache.get_compute_pipeline(pipeline.cube_pipeline)) {
+            pass.set_pipeline(cube_pipeline);
+            pass.set_bind_group(0, cube, &[]);
+            pass.dispatch_workgroups(ENV_SIZE.div_ceil(8), ENV_SIZE.div_ceil(8), 1);
+        }
     }
     // This frame's clouds become the next frame's history.
     ctx.command_encoder().copy_texture_to_texture(out.texture.as_image_copy(), history.texture.as_image_copy(), out.texture.size());

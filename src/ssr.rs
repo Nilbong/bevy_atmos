@@ -39,17 +39,43 @@ impl Plugin for SsrPlugin {
 
 static HISTORY: OnceLock<Handle<Image>> = OnceLock::new();
 
+/// A host's own copy of its camera's last lit image, in place of ours.
+static HOST_HISTORY: std::sync::RwLock<Option<Handle<Image>>> = std::sync::RwLock::new(None);
+
 /// The camera's last lit image, which the materials bind.
 pub fn history() -> Handle<Image> {
+    if let Some(h) = HOST_HISTORY.read().ok().and_then(|h| h.clone()) {
+        return h;
+    }
     HISTORY.get().cloned().unwrap_or_default()
 }
 
+/// A host that already keeps its camera's last lit image (as this module
+/// does: the frame before post-processing, the camera's own size and
+/// format) hands it over: the materials read it and this module copies
+/// nothing. `None` goes back to this module's own copy.
+pub fn set_host_history(image: Option<Handle<Image>>) {
+    if let Ok(mut h) = HOST_HISTORY.write() {
+        *h = image;
+    }
+}
+
+fn host_history() -> bool {
+    HOST_HISTORY.read().is_ok_and(|h| h.is_some())
+}
+
+/// Our copy of the frame worked (the materials march only then: a blank
+/// history would darken every reflection).
+static HISTORY_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The knobs as the materials' uniform: x on (0/1) times strength, y the
-/// roughness cutoff, z the reach (m), w -.
+/// roughness cutoff, z the reach (m), w 1 once there's a frame to reflect.
 pub fn params() -> Vec4 {
     let k = crate::knobs::get;
     let on = k("ssr.enabled", 1.0) >= 0.5;
-    Vec4::new(if on { k("ssr.strength", 1.0).clamp(0.0, 2.0) } else { 0.0 }, k("ssr.roughness", 0.45).clamp(0.02, 1.0), k("ssr.distance", 30.0).clamp(2.0, 200.0), 0.0)
+    let ready = host_history() || HISTORY_OK.load(std::sync::atomic::Ordering::Relaxed);
+    Vec4::new(if on { k("ssr.strength", 1.0).clamp(0.0, 2.0) } else { 0.0 }, k("ssr.roughness", 0.45).clamp(0.02, 1.0), k("ssr.distance", 30.0).clamp(2.0, 200.0), ready as u32 as f32)
 }
 
 /// The camera whose image is kept.
@@ -61,8 +87,13 @@ fn mark_camera(mut commands: Commands, cameras: Query<(Entity, Has<SsrSource>, H
     if crate::knobs::get("ssr.enabled", 1.0) < 0.5 {
         return;
     }
+    let host = host_history();
     for (e, source, depth) in &cameras {
-        if !source {
+        // (A host's own history: no copy of ours.)
+        if host && source {
+            commands.entity(e).remove::<SsrSource>();
+        }
+        if !source && !host {
             commands.entity(e).insert(SsrSource);
         }
         if !depth {
@@ -71,12 +102,16 @@ fn mark_camera(mut commands: Commands, cameras: Query<(Entity, Has<SsrSource>, H
     }
 }
 
-/// The history the size of the camera's image (the copy needs them equal).
-fn size_history(cameras: Query<&Camera, With<SsrSource>>, mut images: ResMut<Assets<Image>>) {
-    let (Some(size), Some(handle)) = (cameras.iter().next().and_then(|c| c.physical_target_size()), HISTORY.get()) else { return };
+/// The history the size and format of the camera's image (the copy needs
+/// them equal): HDR's half floats, else the usual 8-bit sRGB.
+fn size_history(cameras: Query<(&Camera, Has<bevy::camera::Hdr>), With<SsrSource>>, mut images: ResMut<Assets<Image>>) {
+    let (Some((camera, hdr)), Some(handle)) = (cameras.iter().next(), HISTORY.get()) else { return };
+    let Some(size) = camera.physical_target_size() else { return };
     let size = Extent3d { width: size.x.max(1), height: size.y.max(1), depth_or_array_layers: 1 };
-    if images.get(handle).is_some_and(|i| i.texture_descriptor.size != size) {
+    let format = if hdr { TextureFormat::Rgba16Float } else { TextureFormat::Rgba8UnormSrgb };
+    if images.get(handle).is_some_and(|i| i.texture_descriptor.size != size || i.texture_descriptor.format != format) {
         if let Some(mut image) = images.get_mut(handle) {
+            image.texture_descriptor.format = format;
             image.resize(size);
         }
     }
@@ -88,7 +123,21 @@ fn copy_history(view: ViewQuery<&ViewTarget, With<SsrSource>>, images: Res<Rende
     let Some(history) = HISTORY.get().and_then(|h| images.get(h)) else { return };
     let source = target.main_texture();
     if source.size() != history.texture.size() || source.format() != history.texture.format() {
+        // (Once, say why reflections of the scene are missing.)
+        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            warn!(
+                "bevy_atmos: screen-space reflections off: the camera's image ({:?}, {:?}) and the copy ({:?}, {:?}) differ; they match next frame if the camera just changed",
+                source.size(),
+                source.format(),
+                history.texture.size(),
+                history.texture.format()
+            );
+        }
+        HISTORY_OK.store(false, std::sync::atomic::Ordering::Relaxed);
         return;
     }
     ctx.command_encoder().copy_texture_to_texture(source.as_image_copy(), history.texture.as_image_copy(), source.size());
+    if !HISTORY_OK.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        info!("bevy_atmos: screen-space reflections on ({:?}, {:?})", source.size(), source.format());
+    }
 }

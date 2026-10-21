@@ -25,7 +25,7 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<uniform> wind: vec4<f32>;
 // x: sky reflection, y: glitter, z: Fresnel, w: the skybox's brightness.
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> light: vec4<f32>;
-// x: foam, y: foam width (m).
+// x: foam, y: foam width (m), z: rivers' sediment (0 clear .. 1 silty).
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<uniform> body: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<uniform> scatter: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<uniform> absorb: vec4<f32>;
@@ -59,6 +59,14 @@
 // x: the least depth (m) to colour and foam by (`WaterDepth`: a sheet of
 // water just over the ground).
 @group(#{MATERIAL_BIND_GROUP}) @binding(122) var<uniform> extra: vec4<f32>;
+// x: wave height scale, y: wave length scale (the body's size), z: kind
+// (1 puddle, 2 pond, 3 river, 4 sea, 0 unknown), w: 1 to fade by the
+// vertex alpha.
+@group(#{MATERIAL_BIND_GROUP}) @binding(123) var<uniform> kind: vec4<f32>;
+
+fn puddle() -> bool {
+    return abs(kind.z - 1.0) < 0.5;
+}
 
 const PI: f32 = 3.14159265;
 const GERSTNER: i32 = 5;
@@ -143,7 +151,11 @@ fn foam_tex(p: vec2<f32>, coverage: f32, footprint: f32, t: f32) -> f32 {
     if (s3 > 0.0) {
         w3 = mix(0.35, walls(pw * 16.0 + vec2(41.7, 23.9), t * 1.7, width * 1.2), s3);
     }
-    let field = w1 * 0.36 + w2 * 0.36 + w3 * 0.28;
+    // (Irregular, not a net: how much each size of bubble shows varies
+    // across the foam, and the big walls break into gaps.)
+    let mixw = noise2(p * 0.23 + vec2(13.1, 4.7));
+    let gaps = smoothstep(0.32, 0.58, noise2(p * 1.9 + vec2(2.3, 9.1) + t * 0.05));
+    let field = w1 * mix(0.15, 0.5, mixw) * gaps + w2 * 0.36 + w3 * mix(0.45, 0.18, mixw);
     // Coverage sets the threshold: sparse filaments .. packed foam (only a
     // few small holes left when full).
     let threshold = mix(0.62, -0.06, coverage);
@@ -166,7 +178,8 @@ fn wave(i: i32) -> vec4<f32> {
     var heights = array<f32, 5>(0.5, 0.3, 0.18, 0.1, 0.055);
     let spread = spreads[i];
     let d = vec2(w.x * cos(spread) - w.y * sin(spread), w.x * sin(spread) + w.y * cos(spread));
-    return vec4(d, lengths[i], waves.x * heights[i]);
+    // (Scaled to the body: a pond's short low waves, the sea's swells.)
+    return vec4(d, lengths[i] * kind.y, waves.x * heights[i] * kind.x);
 }
 
 // Where the surface point that started at `p` (xz) is moved to.
@@ -187,7 +200,7 @@ fn gerstner_offset(p: vec2<f32>, t: f32) -> vec3<f32> {
 
 // The surface's normal there (xyz) and how much it's squeezed (w: below 1
 // on sharp crests, where foam forms).
-fn gerstner_normal(p: vec2<f32>, t: f32) -> vec4<f32> {
+fn gerstner_normal(p: vec2<f32>, t: f32, footprint: f32) -> vec4<f32> {
     var n = vec3(0.0, 1.0, 0.0);
     var squeeze = 1.0;
     for (var i = 0; i < GERSTNER; i++) {
@@ -196,7 +209,10 @@ fn gerstner_normal(p: vec2<f32>, t: f32) -> vec4<f32> {
         let omega = sqrt(9.81 * k) * waves.y;
         let q = waves.z * min(k * w.w / 0.12, 1.0) / max(k * w.w * f32(GERSTNER), 1e-4);
         let x = k * dot(w.xy, p) - omega * t + f32(i) * 1.93;
-        let wa = k * w.w;
+        // (Waves shorter than a few pixels fade: they aliased into bands.
+        // Their crests are sharper than the wave, by the steepness: by
+        // that too, or they striped a river seen along its length.)
+        let wa = k * w.w * smoothstep(w.z * 0.5, w.z * 0.12, footprint * (1.5 + 6.0 * q * k * w.w));
         n -= vec3(w.x * wa * cos(x), q * wa * sin(x), w.y * wa * cos(x));
         squeeze -= q * wa * sin(x) * 1.6;
     }
@@ -211,12 +227,16 @@ fn detail(p: vec2<f32>, t: f32, footprint: f32) -> vec2<f32> {
     var g = vec2(0.0);
     var wl = 2.2 / waves.w;
     for (var i = 0; i < 10; i++) {
-        let spread = (hash2(vec2(f32(i), 3.7)) - 0.5) * 2.2;
+        // (A river's ripples every way: round the wind they lined up in
+        // parallel bands down its length.)
+        let spread = (hash2(vec2(f32(i), 3.7)) - 0.5) * select(2.2, 5.5, river());
         let d = vec2(w.x * cos(spread) - w.y * sin(spread), w.x * sin(spread) + w.y * cos(spread));
         let k = 2.0 * PI / wl;
         let omega = sqrt(9.81 * k) * waves.y;
         // (Calm water still has fine ripples; rough water more.)
-        let a = (0.012 + 0.02 * waves.x) * wl * smoothstep(wl * 0.5, wl * 0.12, footprint);
+        // (A puddle lies all but still.)
+        // (The sharpened crests are finer than the wave: faded by that.)
+        let a = (0.012 + 0.02 * waves.x) * select(1.0, 0.06, puddle()) * wl * smoothstep(wl * 0.5, wl * 0.12, footprint * (0.5 + 0.6 * sharp));
         let x = k * dot(d, p) - omega * t + hash2(vec2(f32(i), 9.1)) * 6.28;
         let e = exp(sharp * (sin(x) - 1.0));
         g += d * (a * k * cos(x) * e);
@@ -365,7 +385,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let to_eye = view.world_position - wp;
     let dist = length(to_eye);
     let v = to_eye / dist;
-    let gn = normalize(in.world_normal);
+    // (Water faces up: a host mesh built facing down is turned over, or
+    // it was drawn as if seen from below.)
+    var gn = normalize(in.world_normal);
+    if (gn.y < 0.0) {
+        gn = -gn;
+    }
 
     // How much water the eye looks through to what's behind, and how deep
     // the water is there (m).
@@ -449,7 +474,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let rough = (0.5 + speed * 0.35) * (1.0 - 0.7 * calm);
         fine = (f0 * w0 + f1 * (1.0 - w0)) * rough;
     } else {
-        g = gerstner_normal(base, t);
+        g = gerstner_normal(base, t, footprint);
         fine = detail(base, t, footprint);
     }
     let drops = rain(base, t) * wind.z * smoothstep(0.06, 0.015, footprint);
@@ -458,20 +483,33 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         // On its own (perhaps sloped) surface: the waves' slopes about its
         // own normal.
         let sg = -g.xz / max(g.y, 0.2);
-        n = normalize(gn + vec3(sg.x - fine.x - drops.x * 0.1, 0.0, sg.y - fine.y - drops.y * 0.1));
+        // (A host's low-poly water mesh has faceted normals: the glitter
+        // showed its triangles. Near-flat water shades about straight up,
+        // only a real slope keeps the mesh's.)
+        let up = vec3(0.0, 1.0, 0.0);
+        // (Only a steep fall keeps the mesh's: a host's split per-triangle
+        // normals showed as facets in the glitter.)
+        let shade_n = normalize(mix(up, gn, smoothstep(0.5, 0.3, gn.y)));
+        n = normalize(shade_n + vec3(sg.x - fine.x - drops.x * 0.1, 0.0, sg.y - fine.y - drops.y * 0.1));
     }
     let below = wind.w > 0.5 || dot(v, gn) < 0.0;
 
     // The water's body lit by the scene's lights (shadows, ambient): its
     // own colour, no specular (the reflections are below).
-    pbr_input.material.base_color = vec4(scatter.rgb, 1.0);
+    // (A river carries silt: its body leans to the colour of its banks'
+    // earth and swallows blue first, not a pool's clean turquoise.)
+    let sed = select(0.0, saturate(body.z), is_river);
+    let silt = vec3(0.55, 0.45, 0.28) * dot(scatter.rgb, vec3(0.2126, 0.7152, 0.0722)) * 1.6;
+    let body_rgb = mix(scatter.rgb, silt, sed);
+    let absorb_rgb = absorb.rgb * mix(vec3(1.0), vec3(0.6, 0.9, 1.7), sed);
+    pbr_input.material.base_color = vec4(body_rgb, 1.0);
     pbr_input.material.reflectance = vec3(0.0);
     pbr_input.material.perceptual_roughness = 1.0;
     pbr_input.N = gn;
     // (Plus the host's own light on it, `WaterAmbient`.)
-    let lit = apply_pbr_lighting(pbr_input).rgb + scatter.rgb * extra.yzw * view.exposure;
+    let lit = apply_pbr_lighting(pbr_input).rgb + body_rgb * extra.yzw * view.exposure;
     // The light falling on it, for the foam.
-    let irradiance = lit.g / max(scatter.g, 1e-4);
+    let irradiance = lit.g / max(body_rgb.g, 1e-4);
 
     var r = reflect(-v, n);
     r = vec3(r.x, abs(r.y), r.z);
@@ -498,22 +536,41 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // still pool, so shallow river water isn't just clear over its bed.)
     let turbidity = select(1.0, 3.0, is_river);
     // (A sheet of water just over the ground: coloured as if deeper.)
-    let ray_c = max(ray, extra.x);
-    let depth_c = max(depth, extra.x);
-    let trans = exp(-absorb.rgb * turbidity * ray_c);
-    let through = dot(trans, vec3(1.0 / 3.0));
+    // (A puddle is a film: whatever depth the host gave its water, it
+    // colours as a few centimetres, a thin dark tint over its ground.)
+    let least = select(extra.x, min(extra.x, 0.05), puddle());
+    let ray_c = max(ray, least);
+    let depth_c = max(depth, least);
+    let trans = exp(-absorb_rgb * turbidity * ray_c);
+    // (The wet ground under a puddle darkens: some of it always covered.)
+    let through = select(dot(trans, vec3(1.0 / 3.0)), min(dot(trans, vec3(1.0 / 3.0)), 0.35), puddle());
 
     let ndv = max(dot(n, v), 0.0);
-    let fresnel = clamp(0.02 + 0.98 * pow(1.0 - ndv, 5.0 / light.z), 0.0, 1.0);
+    var fresnel = clamp(0.02 + 0.98 * pow(1.0 - ndv, 5.0 / light.z), 0.0, 1.0);
+    // (A puddle: a thin mirror over its ground.)
+    if (puddle()) {
+        // (Clearly a mirror: a dimmer floor read as a faint smear on the
+        // ground, AC1's Damascus puddles.)
+        fresnel = max(fresnel, 0.4);
+    }
     // (The water's edge fades in, not a hard reflecting line.)
-    let edge = smoothstep(0.0, 0.06, depth);
+    // (By the coloured depth: a host's sheet of water, a few centimetres
+    // over the ground all over, reflects fully; its edge fades by its
+    // vertex alpha instead.)
+    let edge = smoothstep(0.0, 0.06, depth_c);
     // What's on screen where the reflection lands, over the sky.
-    let reflected = mix(sky_at(r), screen.rgb, saturate(screen.a)) * light.x;
+    // (Where the screen has nothing (off its edge), a low reflected ray
+    // would see walls and the ground's surroundings, not the bright sky:
+    // the sky darkens toward the horizon there.)
+    let surround = mix(0.35, 1.0, smoothstep(0.02, 0.45, r.y));
+    let reflected = mix(sky_at(r) * surround, screen.rgb, saturate(screen.a)) * light.x;
 
     // The sun's (or moon's) glitter: a very sharp highlight on each facet.
     let l = normalize(sun_dir.xyz);
     let h = normalize(l + v);
-    let shine = 2400.0;
+    // (Broader where a pixel covers more water: tight highlights there
+    // sparkled into facets.)
+    let shine = mix(2400.0, 300.0, saturate(footprint * 8.0));
     let ndh = max(dot(n, h), 0.0);
     let d = (shine + 2.0) / (2.0 * PI) * pow(ndh, shine);
     let f_sun = 0.02 + 0.98 * pow(1.0 - max(dot(h, v), 0.0), 5.0);
@@ -538,8 +595,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let crest = foam_look.x * smoothstep(onset, onset - 0.3, g.w);
     var white = 0.0;
     if (is_river) {
-        let steep = 1.0 - saturate(gn.y);
-        let fast = speed + steep * 25.0 * flow_look.x;
+        // (Steepness only where the water really falls: the banks of a
+        // host's river mesh curve up, and turned whole banks white.)
+        let steep = smoothstep(0.25, 0.6, 1.0 - saturate(gn.y));
+        let fast = speed + steep * 6.0 * flow_look.x;
         white = smoothstep(flow_look.y * 0.7, flow_look.y * 1.5, fast);
         white = max(white, trail * trail * 0.9);
     }
@@ -554,13 +613,26 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let q0 = base - fl.xz * ph0 * cycle;
         let q1 = base - fl.xz * ph1 * cycle + vec2(5.1, 2.3);
         // (Streaked along the flow: stretched that way.)
-        let a0 = vec2(dot(q0, fdir) * 0.55, dot(q0, side) * 1.4);
-        let a1 = vec2(dot(q1, fdir) * 0.55, dot(q1, side) * 1.4);
-        foam_amount = foam_tex(a0, coverage, footprint * 1.4, t) * w0 + foam_tex(a1, coverage, footprint * 1.4, t) * (1.0 - w0);
+        // (Long streaks along the flow, broken up: patches where it gathers,
+        // thin or none elsewhere; two scales, so no regular net shows.)
+        let a0 = vec2(dot(q0, fdir) * 0.3, dot(q0, side) * 2.2);
+        let a1 = vec2(dot(q1, fdir) * 0.3, dot(q1, side) * 2.2);
+        let breakup = smoothstep(0.35, 0.8, noise2(a0 * 0.35 + vec2(3.1, 7.7)) * 0.65 + noise2(base * 0.9) * 0.35);
+        let cov_r = saturate(coverage * mix(0.25, 1.0, breakup));
+        foam_amount = (foam_tex(a0, cov_r, footprint * 1.4, t) * w0 + foam_tex(a1 * 1.7, cov_r, footprint * 2.0, t) * (1.0 - w0)) * mix(0.35, 1.0, breakup);
     } else {
-        foam_amount = foam_tex(base + wind.xy * t * 0.05, coverage, footprint, t);
+        // Shore and object foam round about; crest foam in streaks along
+        // the way the waves run.
+        let q = base + wind.xy * t * 0.05;
+        let wd = wind_dir();
+        let along = vec2(dot(q, wd) * 0.45, dot(q, vec2(-wd.y, wd.x)) * 1.5);
+        // (Patchy: dense in places, thin or none in others, not an even net.)
+        let patches = smoothstep(0.25, 0.75, noise2(along * 0.6 + vec2(7.3, 1.1)) * 0.7 + noise2(q * 0.35) * 0.3);
+        foam_amount = max(foam_tex(q, saturate(shore), footprint, t), foam_tex(along, saturate(crest * patches * 1.3), footprint * 1.5, t));
     }
-    let foam = clamp(foam_amount + drops.z * 0.6, 0.0, 1.0) * smoothstep(0.0, 0.02, depth);
+    // (No shore foam round a puddle: its whole sheet is "shallow", and the
+    // bubble lattice showed as white cracks all over it.)
+    let foam = clamp(select(foam_amount, 0.0, puddle()) + drops.z * 0.6, 0.0, 1.0) * smoothstep(0.0, 0.02, depth);
     let foam_rgb = vec3(0.85) * irradiance;
 
     let water = lit * (vec3(1.0) - trans) * (1.0 - fresnel);
@@ -568,8 +640,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var alpha = 1.0 - through * (1.0 - fresnel * edge) * (1.0 - foam);
     var fade = 1.0;
 #ifdef VERTEX_COLORS
-    if (own_mesh) {
-        fade = in.color.a;
+    if (kind.w > 0.5) {
+        // (Broken up by noise: an even fade band read as a cut-out shape.)
+        let ragged = noise2(wp.xz * 1.7) * 0.6 + noise2(wp.xz * 5.3) * 0.4;
+        // (Gently: on a puddle made of thin pieces, everywhere near an edge,
+        // a hard cut showed as cracks.)
+        fade = smoothstep(0.0, 1.0, saturate(in.color.a * 1.4 + (ragged - 0.5) * 0.45));
+        // (A puddle stays water inside its soft rim: built of thin pieces,
+        // it had faded all but away.)
+        if (puddle()) {
+            fade = max(fade, 0.55 * smoothstep(0.02, 0.15, in.color.a + (ragged - 0.5) * 0.08));
+        }
     }
 #endif
     // (Premultiplied: faded out, the light it adds fades too.)

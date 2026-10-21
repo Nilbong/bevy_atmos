@@ -251,7 +251,7 @@ fn drive(
         m.centre = eye.extend(t);
         m.extent = extent.extend(share);
         m.velocity = if draw.0 >= 5 { Vec4::new(weather.wind.x * SNOW_DRIFT, -SNOW_FALL, weather.wind.y * SNOW_DRIFT, 0.0) } else { velocity.extend(0.03) };
-        m.light = (light * if draw.0 >= 5 { SNOW_GAIN } else { 1.0 }).extend(0.0);
+        m.light = (light * if draw.0 >= 5 { SNOW_GAIN } else { 1.0 }).extend(k("rain.shelter_debug", 0.0));
         m.key_dir = tod.sun_dir.extend(k("rain.opacity", 0.35).max(0.0));
         m.key_light = (key_light * if draw.0 >= 5 { SNOW_GAIN } else { 1.0 }).extend(0.0);
         if draw.0 == 4 {

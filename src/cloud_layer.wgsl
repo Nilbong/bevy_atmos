@@ -26,7 +26,13 @@ fn vertex(@location(0) position: vec3<f32>) -> Out {
 
 @fragment
 fn fragment(in: Out) -> @location(0) vec4<f32> {
-    let c = textureSampleLevel(clouds, clouds_sampler, in.uv, 0.0);
+    // (A small tent over the half-resolution march: its last noise showed as
+    // a fine grid when scaled up with one tap.)
+    let px = 0.5 / vec2<f32>(textureDimensions(clouds));
+    let c = (textureSampleLevel(clouds, clouds_sampler, in.uv + vec2(px.x, px.y), 0.0)
+        + textureSampleLevel(clouds, clouds_sampler, in.uv + vec2(-px.x, px.y), 0.0)
+        + textureSampleLevel(clouds, clouds_sampler, in.uv + vec2(px.x, -px.y), 0.0)
+        + textureSampleLevel(clouds, clouds_sampler, in.uv + vec2(-px.x, -px.y), 0.0)) * 0.25;
     // Premultiplied: the clouds' light added, the sky behind dimmed by
     // their transmittance.
     return vec4(c.rgb * look.x * view.exposure, 1.0 - saturate(c.a));

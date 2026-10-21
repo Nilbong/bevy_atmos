@@ -233,7 +233,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
 
 <div class="wrap oneline">
   <div class="card">
-    <div class="label">One plugin line<small>plus a tag on your camera and sun</small></div>
+    <div class="label">One plugin line<small>camera, sun and water are found for you</small></div>
     <pre><code><span class="tok-t">App</span>::new().add_plugins((<span class="tok-t">DefaultPlugins</span>, <span class="tok-t">AtmosPlugin</span>::new(<span class="tok-s">"my_level"</span>, <span class="tok-s">"looks"</span>)))</code></pre>
   </div>
 </div>
@@ -249,7 +249,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
       <div class="feature">
         <div class="icon i-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></div>
         <h3>A look editor anyone can use</h3>
-        <p>Press F9. Six plain-English tabs, a help line on every slider, click to reset, presets, Save, Revert and hold-to-compare.</p>
+        <p>Press F9. Seven plain-English tabs, a help line on every slider, click to reset, presets, Save, Revert and hold-to-compare.</p>
       </div>
       <div class="feature">
         <div class="icon i-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></div>
@@ -273,8 +273,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
       </div>
       <div class="feature">
         <div class="icon i-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M5 6l2 2M19 6l-2 2M3 21l6-9M9 21l3-9M15 21l-3-9M21 21l-6-9"/></svg></div>
-        <h3>Fog, shafts &amp; reflections</h3>
-        <p>Distance fog tinted by the sky, beams of sunlight through the haze, and screen-space reflections on wet ground.</p>
+        <h3>Fog, light &amp; shadows</h3>
+        <p>Distance fog tinted by the sky, sun shafts, reflections on wet ground, and shadow softness, contact shadows and ambient occlusion per level.</p>
       </div>
       <div class="feature">
         <div class="icon i-violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M12 12l6.4-6.4"/></svg></div>
@@ -302,7 +302,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
       <div class="eyebrow">The editor</div>
       <h2>Made for people who aren't graphics programmers</h2>
       <ul>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Tabs with plain names: Time &amp; Sun, Sky &amp; Clouds, Weather, Water, Fog &amp; Light, Colour. Extra settings wait under <em>Advanced</em>.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Tabs with plain names: Time &amp; Sun, Sky &amp; Clouds, Weather, Water, Fog &amp; Light, Shadows, Colour. Extra settings wait under <em>Advanced</em>.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Every slider shows its unit, says what it does when you hover it, and resets with one click.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>Hold <em>Compare</em> to see the level as your game made it. Save, or Revert to the last save.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12l5 5 9-10"/></svg><span>The status line says which level's look is loaded and whether it has unsaved changes.</span></li>
@@ -325,10 +325,13 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
       <figure><div class="shot"><img src="img/storm.jpg" alt="A storm: heavy rain, dark clouds, soaked ground and puddles" loading="lazy" width="1280" height="720"></div><figcaption><b>Storm.</b> Rain, wind and puddles.</figcaption></figure>
       <figure><div class="shot"><img src="img/snow.jpg" alt="Snow falling over the scene under a white overcast sky" loading="lazy" width="1280" height="720"></div><figcaption><b>Snow.</b> Cold light and falling snow.</figcaption></figure>
       <figure><div class="shot"><img src="img/night.jpg" alt="Night lit by the moon" loading="lazy" width="1280" height="720"></div><figcaption><b>Night.</b> The moon takes over.</figcaption></figure>
-      <figure><div class="shot"><img src="img/clouds.jpg" alt="An overcast sky of volumetric clouds" loading="lazy" width="1280" height="720"></div><figcaption><b>Overcast.</b> Volumetric clouds.</figcaption></figure>
+      <figure><div class="shot"><img src="img/clouds.jpg" alt="A clear day of volumetric cumulus clouds" loading="lazy" width="1280" height="720"></div><figcaption><b>Clear Day.</b> Cumulus of every size, out to the horizon.</figcaption></figure>
+      <figure><div class="shot"><img src="img/puddle.jpg" alt="A puddle mirroring the boxes around it" loading="lazy" width="1280" height="720"></div><figcaption><b>Puddle.</b> Still water that mirrors the world.</figcaption></figure>
+      <figure><div class="shot"><img src="img/pond.jpg" alt="A pond found by its mesh name, no tags" loading="lazy" width="1280" height="720"></div><figcaption><b>Pond.</b> Found by its name, with no tags.</figcaption></figure>
+      <figure><div class="shot"><img src="img/shadows.jpg" alt="The editor's Shadows tab with contact shadows and ambient occlusion on" loading="lazy" width="1280" height="720"></div><figcaption><b>Shadows tab.</b> Unset keeps your game's own.</figcaption></figure>
       <figure><div class="shot"><img src="img/water.jpg" alt="Rough water in a pool with foam on the wave crests" loading="lazy" width="1280" height="720"></div><figcaption><b>Rough water.</b> Wind-driven waves and crest foam.</figcaption></figure>
       <figure><div class="shot"><img src="img/shore.jpg" alt="Waves breaking into foam along the pool's edge" loading="lazy" width="1280" height="720"></div><figcaption><b>Shoreline.</b> Foam where water meets the edge.</figcaption></figure>
-      <figure><div class="shot"><img src="img/hero.jpg" alt="Golden hour over the demo scene" loading="lazy" width="1280" height="720"></div><figcaption><b>Golden Hour.</b> Low sun and long shadows.</figcaption></figure>
+      <figure><div class="shot"><img src="img/hero.jpg" alt="Golden hour over the demo scene" loading="lazy" width="1280" height="720"></div><figcaption><b>Golden Hour.</b> Sunlit cumulus at sunset.</figcaption></figure>
       <figure><div class="shot"><img src="img/river.jpg" alt="A river flowing past a rock with foam trailing behind it" loading="lazy" width="1280" height="720"></div><figcaption><b>River.</b> Foam trailing a rock.</figcaption></figure>
       <figure><div class="shot"><img src="img/river_glitter.jpg" alt="Sun glitter on a river at sunset, looking downstream" loading="lazy" width="1280" height="720"></div><figcaption><b>Downstream.</b> Low sun glitter on the flow.</figcaption></figure>
     </div>
@@ -351,10 +354,10 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space
 bevy_atmos = { git = <span class="tok-s">"https://github.com/Nilbong/bevy_atmos"</span> }</code></pre>
         </div></div>
         <div class="step"><div>
-          <h3>Add the plugin and tag your camera and sun</h3>
-          <p>The level's name names its saved look; the folder is where looks go.</p>
+          <h3>Add the plugin</h3>
+          <p>That's all most games need: Atmos uses your 3D camera, your brightest directional light as the sun, and finds water meshes by name. The level's name names its saved look; the folder is where looks go.</p>
 <pre><code><span class="tok-k">use</span> bevy::prelude::*;
-<span class="tok-k">use</span> bevy_atmos::{<span class="tok-t">AtmosCamera</span>, <span class="tok-t">AtmosPlugin</span>, <span class="tok-t">AtmosSun</span>};
+<span class="tok-k">use</span> bevy_atmos::<span class="tok-t">AtmosPlugin</span>;
 
 <span class="tok-k">fn</span> main() {
     <span class="tok-t">App</span>::new()
@@ -363,9 +366,10 @@ bevy_atmos = { git = <span class="tok-s">"https://github.com/Nilbong/bevy_atmos"
         .run();
 }
 
+<span class="tok-c">// Your own camera and sun, untagged: found automatically.</span>
 <span class="tok-k">fn</span> setup(<span class="tok-k">mut</span> commands: <span class="tok-t">Commands</span>) {
-    commands.spawn((<span class="tok-t">Camera3d</span>::default(), bevy::camera::<span class="tok-t">Hdr</span>, <span class="tok-t">AtmosCamera</span>));
-    commands.spawn((<span class="tok-t">DirectionalLight</span> { shadow_maps_enabled: <span class="tok-k">true</span>, ..default() }, <span class="tok-t">AtmosSun</span>));
+    commands.spawn((<span class="tok-t">Camera3d</span>::default(), bevy::camera::<span class="tok-t">Hdr</span>));
+    commands.spawn(<span class="tok-t">DirectionalLight</span> { shadow_maps_enabled: <span class="tok-k">true</span>, ..default() });
 }</code></pre>
         </div></div>
         <div class="step"><div>
@@ -404,14 +408,16 @@ weather.rain = <span class="tok-s">0.4</span></code></pre>
   <div class="wrap">
     <div class="head">
       <div class="eyebrow">Get it running in your project</div>
-      <h2>Opt in to the parts you want</h2>
-      <p class="lead">The sky, clouds, fog, shafts, rain, snow and grade work with just the camera and sun tagged. These make the rest of your level join in.</p>
+      <h2>Most games need nothing more</h2>
+      <p class="lead">Atmos picks your camera and sun, and finds water meshes named water, sea, river, pool and so on. Tag things only to override, or add these to make the rest of your level join in.</p>
     </div>
     <div class="integ">
       <div class="panel"><h3>Wet surfaces <code>WetMaterial</code></h3><p>A <code>StandardMaterial</code> extension. Use <code>Wet::ground()</code> for floors that collect puddles and <code>Wet::surface()</code> for walls and props.</p></div>
-      <div class="panel"><h3>Water <code>AtmosWater</code></h3><p>Put it on each water mesh. With <em>Modern water</em> on, Atmos draws modern water over it; turn it off and your own water shows again.</p></div>
+      <div class="panel"><h3>Water <code>AtmosWater</code></h3><p>Found by name, or click it with the editor's <em>Mark water</em> tool, or tag it: <code>commands.entity(water_mesh).insert(AtmosWater)</code>. With <em>Modern water</em> on (the default), Atmos draws modern water over it; turn it off and your own water shows again.</p></div>
       <div class="panel"><h3>Rivers <code>WaterFlow</code></h3><p>Beside <code>AtmosWater</code>, the water keeps the mesh's slope and flows: from your texture's UV scroll, a UV axis, a world velocity or a flow map. You can also paint flow in the editor.</p></div>
-      <div class="panel"><h3>Shelter map <code>weather::Shelter</code></h3><p>A heights image so rain stops at roofs and drips off their edges. Without one, rain falls everywhere.</p></div>
+      <div class="panel"><h3>Rain under roofs <code>weather::Shelter</code></h3><p>Automatic: while it rains, Atmos looks down over the player to find roofs, awnings and trees, so rain doesn't fall indoors. Insert your own shelter map to override it.</p></div>
+      <div class="panel"><h3>Your own water and sky <code>OwnMesh</code></h3><p><code>OwnMesh</code> draws on your water mesh's own shape, <code>WaterTint</code> and <code>WaterDepth</code> keep your colour and depth, <code>WaterAmbient</code> lights it in a lightmapped world, and <code>clouds::HostSky</code> puts the clouds over your own sky.</p></div>
+      <div class="panel"><h3>Just the parts you need <code>ModernWaterPlugin</code></h3><p>The water and SSR plugins also work on their own, without the full <code>AtmosPlugin</code>.</p></div>
       <div class="panel"><h3>Reflections <code>SSR</code></h3><p>On by default for the tagged camera (it adds a depth prepass). Tune it or turn it off on the Fog &amp; Light tab.</p></div>
       <div class="panel"><h3>Your own systems <code>knobs::get</code></h3><p>Read any value anywhere, e.g. <code>knobs::get("weather.rain", 0.0)</code>. Skip your mouse look while <code>editor::open()</code> is true.</p></div>
     </div>
@@ -433,7 +439,7 @@ weather.rain = <span class="tok-s">0.4</span></code></pre>
       <li><b>Cloud smear on fast turns</b>Clouds update a quarter of their pixels a frame, so a very fast turn smears briefly at the screen edge.</li>
       <li><b>Reflections are screen-space</b>They show only what's on screen; past the edge, water reflects the sky.</li>
       <li><b>Lightmaps stay put</b>Baked lighting doesn't follow the time of day; dynamic lights, sky, fog and shafts do.</li>
-      <li><b>Cost</b>In the demo at 1280x720, clouds take about 0.1 to 0.3 ms of GPU time a frame and the sky about 0.15 ms. Lower <em>Cloud quality</em> on slower GPUs.</li>
+      <li><b>Cost</b>At 1280x720 on an RX 7800 XT: clouds 0.36 to 0.48 ms at the default quality, sky 0.05 ms, modern water about +1.5 ms when a river fills the view (mostly reflections), rain and snow within noise. Set <em>Cloud quality</em> to Low on slower GPUs.</li>
     </ul>
   </div>
 </section>
@@ -444,11 +450,11 @@ weather.rain = <span class="tok-s">0.4</span></code></pre>
       <div class="eyebrow">FAQ</div>
       <h2>Troubleshooting</h2>
     </div>
-    <details><summary>The sky is black or far too bright.</summary><p>Add <code>bevy::camera::Hdr</code> to the camera with <code>AtmosCamera</code>. The sky's brightness is in real units.</p></details>
+    <details><summary>The sky is black or far too bright.</summary><p>Add <code>bevy::camera::Hdr</code> to your 3D camera. The sky's brightness is in real units.</p></details>
     <details><summary>My camera spins when I drag a slider.</summary><p>Your mouse look is still running. Skip it while <code>bevy_atmos::editor::open()</code> or <code>flycam::active()</code> is true.</p></details>
-    <details><summary>My water didn't change.</summary><p>Turn on <em>Modern water</em> on the Water tab, and make sure the water mesh entity has <code>AtmosWater</code>.</p></details>
+    <details><summary>My water didn't change.</summary><p>Check <em>Modern water</em> is on (Water tab; it is by default) and look at its "Water found" line. If your water isn't found, name it with a water word, click it with <em>Mark water</em>, or tag it with <code>AtmosWater</code>.</p></details>
     <details><summary>My saved look didn't load.</summary><p>It's <code>&lt;save_dir&gt;/&lt;level&gt;.txt</code>, relative to the folder the game runs from, and the name must match <code>AtmosLevel</code>. The log prints <code>atmos: N knobs for &lt;level&gt;</code> on load.</p></details>
-    <details><summary>It's slow on my laptop.</summary><p>Lower <em>Cloud quality</em> or turn <em>Volumetric clouds</em> off (Sky &amp; Clouds &gt; Advanced), and lower <em>Sun shaft quality</em> (Fog &amp; Light &gt; Advanced).</p></details>
+    <details><summary>It's slow on my laptop.</summary><p>Set <em>Cloud quality</em> to Low or Off (Sky &amp; Clouds &gt; Advanced), lower <em>Sun shaft quality</em> (Fog &amp; Light &gt; Advanced), and turn <em>Ambient occlusion</em> off (Shadows).</p></details>
   </div>
 </section>
 
